@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const fs = require("fs");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
 const { RSI } = require("technicalindicators");
 
@@ -11,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 /* =============================
-   🔐 MERCADO PAGO CONFIG
+   🔐 MERCADO PAGO
 ============================= */
 
 const client = new MercadoPagoConfig({
@@ -21,32 +20,18 @@ const client = new MercadoPagoConfig({
 const payment = new Payment(client);
 
 /* =============================
-   💾 VIP PERSISTENTE (ARQUIVO)
+   🧠 MEMÓRIA SIMPLES
 ============================= */
 
-const VIP_FILE = "vipUsers.json";
-
-function loadVipUsers() {
-  if (!fs.existsSync(VIP_FILE)) {
-    fs.writeFileSync(VIP_FILE, JSON.stringify([]));
-  }
-  return JSON.parse(fs.readFileSync(VIP_FILE));
-}
-
-function saveVipUsers(users) {
-  fs.writeFileSync(VIP_FILE, JSON.stringify(users, null, 2));
-}
-
-let vipUsers = loadVipUsers();
-
-/* =============================
-   📊 SINAIS
-============================= */
-
+let vipUsers = [];
 let freeSignals = [];
 let vipSignals = [];
 
 const BINANCE_BASE = "https://api.binance.com";
+
+/* =============================
+   📊 RSI
+============================= */
 
 function calculateRSI(closes) {
   return RSI.calculate({
@@ -54,6 +39,28 @@ function calculateRSI(closes) {
     period: 14,
   });
 }
+
+/* =============================
+   ⏰ PRÓXIMA VELA 15M
+============================= */
+
+function getNext15MinCandle() {
+  const now = new Date();
+  const minutes = now.getMinutes();
+  const next = 15 - (minutes % 15);
+
+  now.setMinutes(minutes + next);
+  now.setSeconds(0);
+
+  return now.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/* =============================
+   🎯 GERAR SINAL
+============================= */
 
 function generateSignal(symbol, price, rsi) {
   let signal = "NEUTRO";
@@ -73,10 +80,15 @@ function generateSignal(symbol, price, rsi) {
     rsi: rsi.toFixed(2),
     signal,
     trend,
-    entryTime: "Próxima vela 15m",
+    entryTime: getNext15MinCandle(),
     possibleGain: `${(Math.random() * 5 + 1).toFixed(2)}%`,
+    chartUrl: `https://www.binance.com/pt-BR/trade/${symbol}`,
   };
 }
+
+/* =============================
+   🔄 ATUALIZAR SINAIS
+============================= */
 
 async function updateSignals() {
   try {
@@ -137,6 +149,10 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { email } = req.body;
 
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "Email inválido" });
+    }
+
     const result = await payment.create({
       body: {
         transaction_amount: 29.9,
@@ -156,13 +172,13 @@ app.post("/create-payment", async (req, res) => {
         result.point_of_interaction.transaction_data.qr_code,
     });
   } catch (error) {
-    console.log("Erro MP:", error);
+    console.log("Erro MP:", error.response?.data || error);
     res.status(500).json({ error: "Erro ao criar pagamento" });
   }
 });
 
 /* =============================
-   🔍 VERIFICAR PAGAMENTO
+   🔍 CHECK PAYMENT
 ============================= */
 
 app.get("/check-payment/:id/:email", async (req, res) => {
@@ -174,7 +190,6 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     if (result.status === "approved") {
       if (!vipUsers.includes(email)) {
         vipUsers.push(email);
-        saveVipUsers(vipUsers);
       }
     }
 
@@ -206,11 +221,15 @@ app.get("/signals/vip", (req, res) => {
 });
 
 /* =============================
-   🚀 SERVER RENDER
+   🚀 START
 ============================= */
 
 const PORT = process.env.PORT || 3000;
 
+app.get("/", (req, res) => {
+  res.send("Servidor rodando 🚀");
+});
+
 app.listen(PORT, () =>
-  console.log("Servidor rodando na porta " + PORT)
+  console.log(`Servidor rodando na porta ${PORT}`)
 );
