@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
@@ -36,23 +35,27 @@ const payment = new Payment(client);
 ============================= */
 
 app.post("/register", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  if (!email || !password)
-    return res.status(400).json({ error: "Preencha tudo" });
+    if (!email || !password)
+      return res.status(400).json({ error: "Preencha tudo" });
 
-  const exists = users.find((u) => u.email === email);
-  if (exists)
-    return res.status(400).json({ error: "Usuário já existe" });
+    const exists = users.find((u) => u.email === email);
+    if (exists)
+      return res.status(400).json({ error: "Usuário já existe" });
 
-  const hashed = await bcrypt.hash(password, 8);
+    const hashed = await bcrypt.hash(password, 8);
 
-  users.push({
-    email,
-    password: hashed,
-  });
+    users.push({
+      email,
+      password: hashed,
+    });
 
-  res.json({ message: "Conta criada" });
+    res.json({ message: "Conta criada" });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
 });
 
 /* =============================
@@ -60,23 +63,27 @@ app.post("/register", async (req, res) => {
 ============================= */
 
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = users.find((u) => u.email === email);
-  if (!user)
-    return res.status(400).json({ error: "Email inválido" });
+    const user = users.find((u) => u.email === email);
+    if (!user)
+      return res.status(400).json({ error: "Email inválido" });
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid)
-    return res.status(400).json({ error: "Senha inválida" });
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid)
+      return res.status(400).json({ error: "Senha inválida" });
 
-  const token = jwt.sign({ email }, JWT_SECRET);
+    const token = jwt.sign({ email }, JWT_SECRET);
 
-  res.json({ token });
+    res.json({ token });
+  } catch {
+    res.status(500).json({ error: "Erro no login" });
+  }
 });
 
 /* =============================
-   🔐 RECUPERAR SENHA REAL
+   🔐 RECUPERAR SENHA (AJUSTADO)
 ============================= */
 
 app.post("/forgot-password", async (req, res) => {
@@ -91,14 +98,17 @@ app.post("/forgot-password", async (req, res) => {
     if (!user)
       return res.status(404).json({ error: "Usuário não encontrado" });
 
-    // 🔥 Nova senha
+    // 🔥 gerar nova senha
     const novaSenha = Math.random().toString(36).slice(-8);
 
     const hashed = await bcrypt.hash(novaSenha, 8);
     user.password = hashed;
 
+    // 🔥 SMTP SEGURO GMAIL
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -113,13 +123,14 @@ app.post("/forgot-password", async (req, res) => {
         <h2>Recuperação de senha</h2>
         <p>Sua nova senha é:</p>
         <h1>${novaSenha}</h1>
-        <p>Faça login e altere depois.</p>
+        <p>Recomendamos alterar após login.</p>
       `,
     });
 
     res.json({ message: "Nova senha enviada para o e-mail." });
+
   } catch (error) {
-    console.log(error);
+    console.log("ERRO REAL EMAIL:", error); // 🔥 agora mostra no log Render
     res.status(500).json({ error: "Erro ao enviar e-mail" });
   }
 });
