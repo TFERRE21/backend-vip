@@ -4,6 +4,7 @@ const cors = require("cors");
 const axios = require("axios");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
 
 const app = express();
@@ -19,17 +20,10 @@ const JWT_SECRET = "supersecret123";
 
 let users = [];
 let vipUsers = [];
-let freeSignals = [];
-let vipSignals = [];
-let paymentEmails = {}; // salva email por paymentId
 
 /* =============================
-   💳 MERCADO PAGO CONFIG
+   🔐 MERCADO PAGO
 ============================= */
-
-if (!process.env.MP_ACCESS_TOKEN) {
-  console.log("⚠️ MP_ACCESS_TOKEN NÃO DEFINIDO!");
-}
 
 const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
@@ -38,84 +32,27 @@ const client = new MercadoPagoConfig({
 const payment = new Payment(client);
 
 /* =============================
-   📊 GERAR SINAIS
-============================= */
-
-function generateSignal(symbol, price) {
-  const fakeRSI = Math.random() * 100;
-
-  let signal = "NEUTRO";
-  let trend = "LATERAL";
-
-  if (fakeRSI < 30) {
-    signal = "COMPRA";
-    trend = "ALTA";
-  } else if (fakeRSI > 70) {
-    signal = "VENDA";
-    trend = "BAIXA";
-  }
-
-  return {
-    symbol,
-    price,
-    rsi: fakeRSI.toFixed(2),
-    signal,
-    trend,
-    entryTime: new Date().toLocaleTimeString(),
-    possibleGain: `${(Math.random() * 5 + 1).toFixed(2)}%`,
-  };
-}
-
-async function updateSignals() {
-  try {
-    const response = await axios.get(
-      "https://api.binance.com/api/v3/ticker/price"
-    );
-
-    const pairs = response.data
-      .filter((c) => c.symbol.endsWith("USDT"))
-      .slice(0, 150);
-
-    const signals = pairs.map((pair) =>
-      generateSignal(pair.symbol, parseFloat(pair.price))
-    );
-
-    freeSignals = signals.slice(0, 10);
-    vipSignals = signals;
-
-    console.log("✅ Sinais atualizados");
-  } catch (err) {
-    console.log("Erro Binance:", err.message);
-  }
-}
-
-updateSignals();
-setInterval(updateSignals, 5 * 60 * 1000);
-
-/* =============================
    👤 REGISTER
 ============================= */
 
 app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
+  const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: "Preencha email e senha" });
-    }
+  if (!email || !password)
+    return res.status(400).json({ error: "Preencha tudo" });
 
-    const exists = users.find((u) => u.email === email);
-    if (exists) {
-      return res.status(400).json({ error: "Usuário já existe" });
-    }
+  const exists = users.find((u) => u.email === email);
+  if (exists)
+    return res.status(400).json({ error: "Usuário já existe" });
 
-    const hashed = await bcrypt.hash(password, 8);
-    users.push({ email, password: hashed });
+  const hashed = await bcrypt.hash(password, 8);
 
-    res.json({ message: "Conta criada com sucesso" });
-  } catch {
-    res.status(500).json({ error: "Erro interno" });
-  }
+  users.push({
+    email,
+    password: hashed,
+  });
+
+  res.json({ message: "Conta criada" });
 });
 
 /* =============================
@@ -123,52 +60,86 @@ app.post("/register", async (req, res) => {
 ============================= */
 
 app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
+  const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: "Preencha tudo" });
-    }
+  const user = users.find((u) => u.email === email);
+  if (!user)
+    return res.status(400).json({ error: "Email inválido" });
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid)
+    return res.status(400).json({ error: "Senha inválida" });
+
+  const token = jwt.sign({ email }, JWT_SECRET);
+
+  res.json({ token });
+});
+
+/* =============================
+   🔐 RECUPERAR SENHA REAL
+============================= */
+
+app.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email)
+      return res.status(400).json({ error: "Email obrigatório" });
 
     const user = users.find((u) => u.email === email);
-    if (!user) {
-      return res.status(400).json({ error: "Email inválido" });
-    }
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return res.status(400).json({ error: "Senha inválida" });
-    }
+    if (!user)
+      return res.status(404).json({ error: "Usuário não encontrado" });
 
-    const token = jwt.sign({ email }, JWT_SECRET);
-    res.json({ token });
-  } catch {
-    res.status(500).json({ error: "Erro interno" });
+    // 🔥 Nova senha
+    const novaSenha = Math.random().toString(36).slice(-8);
+
+    const hashed = await bcrypt.hash(novaSenha, 8);
+    user.password = hashed;
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Nova senha - CryptoSignals",
+      html: `
+        <h2>Recuperação de senha</h2>
+        <p>Sua nova senha é:</p>
+        <h1>${novaSenha}</h1>
+        <p>Faça login e altere depois.</p>
+      `,
+    });
+
+    res.json({ message: "Nova senha enviada para o e-mail." });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Erro ao enviar e-mail" });
   }
 });
 
 /* =============================
-   💳 CREATE PAYMENT PIX
+   💳 CRIAR PAGAMENTO PIX
 ============================= */
 
 app.post("/create-payment", async (req, res) => {
   try {
-    const { email } = req.body || {};
-
-    if (!email) {
-      return res.status(400).json({ error: "Email obrigatório" });
-    }
+    const { email } = req.body;
 
     const result = await payment.create({
       body: {
         transaction_amount: 29.9,
-        description: "Acesso VIP CryptoSignals",
+        description: "Acesso VIP",
         payment_method_id: "pix",
         payer: { email },
       },
     });
-
-    paymentEmails[result.id] = email;
 
     res.json({
       id: result.id,
@@ -178,44 +149,13 @@ app.post("/create-payment", async (req, res) => {
         result.point_of_interaction.transaction_data.qr_code,
     });
   } catch (error) {
-    console.log("ERRO PAGAMENTO:", error);
-    res.status(500).json({
-      error: "Erro pagamento",
-      details: error.message,
-    });
+    console.log(error);
+    res.status(500).json({ error: "Erro pagamento" });
   }
 });
 
 /* =============================
-   🔔 WEBHOOK AUTOMÁTICO
-============================= */
-
-app.post("/webhook", async (req, res) => {
-  try {
-    if (req.body.type === "payment") {
-      const paymentId = req.body.data.id;
-
-      const result = await payment.get({ id: paymentId });
-
-      if (result.status === "approved") {
-        const email = paymentEmails[paymentId];
-
-        if (email && !vipUsers.includes(email)) {
-          vipUsers.push(email);
-          console.log("✅ VIP liberado automaticamente:", email);
-        }
-      }
-    }
-
-    res.sendStatus(200);
-  } catch (error) {
-    console.log("Erro webhook:", error.message);
-    res.sendStatus(500);
-  }
-});
-
-/* =============================
-   🔍 CHECK PAYMENT (MANUAL)
+   🔍 CHECK PAYMENT
 ============================= */
 
 app.get("/check-payment/:id/:email", async (req, res) => {
@@ -231,8 +171,8 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     }
 
     res.json({ status: result.status });
-  } catch (error) {
-    res.status(500).json({ error: "Erro verificar pagamento" });
+  } catch {
+    res.status(500).json({ error: "Erro verificar" });
   }
 });
 
@@ -244,26 +184,6 @@ app.get("/check-vip/:email", (req, res) => {
   res.json({ vip: vipUsers.includes(req.params.email) });
 });
 
-/* =============================
-   📡 SINAIS
-============================= */
-
-app.get("/signals/free", (req, res) => {
-  res.json(freeSignals);
-});
-
-app.get("/signals/vip", (req, res) => {
-  res.json(vipSignals);
-});
-
-/* =============================
-   ROOT
-============================= */
-
-app.get("/", (req, res) => {
-  res.send("Backend rodando 🚀");
-});
-
 app.listen(PORT, () => {
-  console.log("🚀 Servidor rodando na porta", PORT);
+  console.log("Servidor rodando na porta", PORT);
 });
