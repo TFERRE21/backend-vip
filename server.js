@@ -24,7 +24,7 @@ let freeSignals = [];
 let vipSignals = [];
 
 /* =============================
-   🔐 MERCADO PAGO
+   💳 MERCADO PAGO CONFIG
 ============================= */
 
 const client = new MercadoPagoConfig({
@@ -34,24 +34,19 @@ const client = new MercadoPagoConfig({
 const payment = new Payment(client);
 
 /* =============================
-   📊 RSI
+   📊 FUNÇÕES RSI
 ============================= */
 
-function calculateRSI(closes) {
-  return RSI.calculate({
-    values: closes,
-    period: 14,
-  });
-}
+function generateSignal(symbol, price) {
+  const fakeRSI = Math.random() * 100;
 
-function generateSignal(symbol, price, rsi) {
   let signal = "NEUTRO";
   let trend = "LATERAL";
 
-  if (rsi < 30) {
+  if (fakeRSI < 30) {
     signal = "COMPRA";
     trend = "ALTA";
-  } else if (rsi > 70) {
+  } else if (fakeRSI > 70) {
     signal = "VENDA";
     trend = "BAIXA";
   }
@@ -59,7 +54,7 @@ function generateSignal(symbol, price, rsi) {
   return {
     symbol,
     price,
-    rsi: rsi.toFixed(2),
+    rsi: fakeRSI.toFixed(2),
     signal,
     trend,
     entryTime: new Date().toLocaleTimeString(),
@@ -68,7 +63,7 @@ function generateSignal(symbol, price, rsi) {
 }
 
 /* =============================
-   🔄 ATUALIZAR SINAIS
+   🔄 ATUALIZA SINAIS
 ============================= */
 
 async function updateSignals() {
@@ -85,8 +80,7 @@ async function updateSignals() {
 
     for (let pair of pairs) {
       const price = parseFloat(pair.price);
-      const fakeRSI = Math.random() * 100;
-      signals.push(generateSignal(pair.symbol, price, fakeRSI));
+      signals.push(generateSignal(pair.symbol, price));
     }
 
     freeSignals = signals.slice(0, 10);
@@ -94,7 +88,7 @@ async function updateSignals() {
 
     console.log("Sinais atualizados");
   } catch (err) {
-    console.log("Erro Binance");
+    console.log("Erro Binance:", err.message);
   }
 }
 
@@ -167,23 +161,33 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { email } = req.body;
 
+    if (!email) {
+      return res.status(400).json({ error: "Email obrigatório" });
+    }
+
     const result = await payment.create({
       body: {
         transaction_amount: 29.9,
-        description: "Acesso VIP",
+        description: "Acesso VIP CryptoSignals",
         payment_method_id: "pix",
-        payer: { email },
+        payer: {
+          email: email,
+        },
       },
     });
 
+    const data = result.response;
+
     res.json({
-      id: result.id,
+      id: data.id,
       qrCodeBase64:
-        result.point_of_interaction.transaction_data.qr_code_base64,
+        data.point_of_interaction.transaction_data.qr_code_base64,
       pixCode:
-        result.point_of_interaction.transaction_data.qr_code,
+        data.point_of_interaction.transaction_data.qr_code,
     });
-  } catch {
+
+  } catch (error) {
+    console.log("ERRO MERCADO PAGO:", error);
     res.status(500).json({ error: "Erro pagamento" });
   }
 });
@@ -197,16 +201,19 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     const { id, email } = req.params;
 
     const result = await payment.get({ id });
+    const data = result.response;
 
-    if (result.status === "approved") {
+    if (data.status === "approved") {
       if (!vipUsers.includes(email)) {
         vipUsers.push(email);
       }
     }
 
-    res.json({ status: result.status });
-  } catch {
-    res.status(500).json({ error: "Erro verificar" });
+    res.json({ status: data.status });
+
+  } catch (error) {
+    console.log("Erro check:", error);
+    res.status(500).json({ error: "Erro verificar pagamento" });
   }
 });
 
@@ -228,6 +235,14 @@ app.get("/signals/free", (req, res) => {
 
 app.get("/signals/vip", (req, res) => {
   res.json(vipSignals);
+});
+
+/* =============================
+   🚀 START SERVER
+============================= */
+
+app.get("/", (req, res) => {
+  res.send("Backend rodando 🚀");
 });
 
 app.listen(PORT, () => {
