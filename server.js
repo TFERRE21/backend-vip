@@ -23,7 +23,7 @@ let freeSignals = [];
 let vipSignals = [];
 
 /* =============================
-   💳 MERCADO PAGO
+   💳 MERCADO PAGO CONFIG
 ============================= */
 
 if (!process.env.MP_ACCESS_TOKEN) {
@@ -109,11 +109,10 @@ app.post("/register", async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 8);
-
     users.push({ email, password: hashed });
 
     res.json({ message: "Conta criada com sucesso" });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -141,65 +140,54 @@ app.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign({ email }, JWT_SECRET);
-
     res.json({ token });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Erro interno" });
   }
 });
 
 /* =============================
-   🔄 RECUPERAR SENHA
-============================= */
-
-app.post("/forgot-password", (req, res) => {
-  const { email } = req.body || {};
-
-  if (!email) {
-    return res.status(400).json({ error: "Email obrigatório" });
-  }
-
-  res.json({ message: "Simulação de recuperação enviada" });
-});
-
-/* =============================
-   💳 CREATE PAYMENT (PIX)
+   💳 CREATE PAYMENT PIX
 ============================= */
 
 app.post("/create-payment", async (req, res) => {
   try {
-    if (!req.body || !req.body.email) {
-      console.log("BODY RECEBIDO:", req.body);
+    const { email } = req.body || {};
+
+    if (!email) {
       return res.status(400).json({
         error: "Email obrigatório no body",
       });
     }
-
-    const email = req.body.email;
 
     const result = await payment.create({
       body: {
         transaction_amount: 29.9,
         description: "Acesso VIP CryptoSignals",
         payment_method_id: "pix",
-        payer: {
-          email: email,
-        },
+        payer: { email },
       },
     });
 
-    const data = result.response;
+    console.log("RETORNO COMPLETO MP:", result);
+
+    if (!result || !result.point_of_interaction) {
+      return res.status(500).json({
+        error: "Mercado Pago não retornou dados do PIX",
+      });
+    }
 
     res.json({
-      id: data.id,
+      id: result.id,
       qrCodeBase64:
-        data.point_of_interaction.transaction_data.qr_code_base64,
+        result.point_of_interaction.transaction_data.qr_code_base64,
       pixCode:
-        data.point_of_interaction.transaction_data.qr_code,
+        result.point_of_interaction.transaction_data.qr_code,
     });
+
   } catch (error) {
     console.log("🔥 ERRO MERCADO PAGO 🔥");
-    console.log(error.response?.data || error);
+    console.log(error);
 
     res.status(500).json({
       error: "Erro pagamento",
@@ -217,15 +205,14 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     const { id, email } = req.params;
 
     const result = await payment.get({ id });
-    const data = result.response;
 
-    if (data.status === "approved") {
+    if (result.status === "approved") {
       if (!vipUsers.includes(email)) {
         vipUsers.push(email);
       }
     }
 
-    res.json({ status: data.status });
+    res.json({ status: result.status });
   } catch (error) {
     res.status(500).json({ error: "Erro verificar pagamento" });
   }
