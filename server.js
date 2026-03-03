@@ -21,6 +21,7 @@ let users = [];
 let vipUsers = [];
 let freeSignals = [];
 let vipSignals = [];
+let paymentEmails = {}; // salva email por paymentId
 
 /* =============================
    💳 MERCADO PAGO CONFIG
@@ -155,9 +156,7 @@ app.post("/create-payment", async (req, res) => {
     const { email } = req.body || {};
 
     if (!email) {
-      return res.status(400).json({
-        error: "Email obrigatório no body",
-      });
+      return res.status(400).json({ error: "Email obrigatório" });
     }
 
     const result = await payment.create({
@@ -169,13 +168,7 @@ app.post("/create-payment", async (req, res) => {
       },
     });
 
-    console.log("RETORNO COMPLETO MP:", result);
-
-    if (!result || !result.point_of_interaction) {
-      return res.status(500).json({
-        error: "Mercado Pago não retornou dados do PIX",
-      });
-    }
+    paymentEmails[result.id] = email;
 
     res.json({
       id: result.id,
@@ -184,11 +177,8 @@ app.post("/create-payment", async (req, res) => {
       pixCode:
         result.point_of_interaction.transaction_data.qr_code,
     });
-
   } catch (error) {
-    console.log("🔥 ERRO MERCADO PAGO 🔥");
-    console.log(error);
-
+    console.log("ERRO PAGAMENTO:", error);
     res.status(500).json({
       error: "Erro pagamento",
       details: error.message,
@@ -197,7 +187,35 @@ app.post("/create-payment", async (req, res) => {
 });
 
 /* =============================
-   🔍 CHECK PAYMENT
+   🔔 WEBHOOK AUTOMÁTICO
+============================= */
+
+app.post("/webhook", async (req, res) => {
+  try {
+    if (req.body.type === "payment") {
+      const paymentId = req.body.data.id;
+
+      const result = await payment.get({ id: paymentId });
+
+      if (result.status === "approved") {
+        const email = paymentEmails[paymentId];
+
+        if (email && !vipUsers.includes(email)) {
+          vipUsers.push(email);
+          console.log("✅ VIP liberado automaticamente:", email);
+        }
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.log("Erro webhook:", error.message);
+    res.sendStatus(500);
+  }
+});
+
+/* =============================
+   🔍 CHECK PAYMENT (MANUAL)
 ============================= */
 
 app.get("/check-payment/:id/:email", async (req, res) => {
