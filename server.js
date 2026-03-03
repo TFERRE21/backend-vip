@@ -5,7 +5,6 @@ const axios = require("axios");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
-const { RSI } = require("technicalindicators");
 
 const app = express();
 app.use(cors());
@@ -24,8 +23,12 @@ let freeSignals = [];
 let vipSignals = [];
 
 /* =============================
-   💳 MERCADO PAGO CONFIG
+   💳 MERCADO PAGO
 ============================= */
+
+if (!process.env.MP_ACCESS_TOKEN) {
+  console.log("⚠️ MP_ACCESS_TOKEN NÃO DEFINIDO!");
+}
 
 const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
@@ -34,7 +37,7 @@ const client = new MercadoPagoConfig({
 const payment = new Payment(client);
 
 /* =============================
-   📊 FUNÇÕES RSI
+   📊 GERAR SINAIS
 ============================= */
 
 function generateSignal(symbol, price) {
@@ -62,10 +65,6 @@ function generateSignal(symbol, price) {
   };
 }
 
-/* =============================
-   🔄 ATUALIZA SINAIS
-============================= */
-
 async function updateSignals() {
   try {
     const response = await axios.get(
@@ -76,17 +75,14 @@ async function updateSignals() {
       .filter((c) => c.symbol.endsWith("USDT"))
       .slice(0, 150);
 
-    let signals = [];
-
-    for (let pair of pairs) {
-      const price = parseFloat(pair.price);
-      signals.push(generateSignal(pair.symbol, price));
-    }
+    const signals = pairs.map((pair) =>
+      generateSignal(pair.symbol, parseFloat(pair.price))
+    );
 
     freeSignals = signals.slice(0, 10);
-    vipSignals = signals.slice(0, 150);
+    vipSignals = signals;
 
-    console.log("Sinais atualizados");
+    console.log("✅ Sinais atualizados");
   } catch (err) {
     console.log("Erro Binance:", err.message);
   }
@@ -100,23 +96,26 @@ setInterval(updateSignals, 5 * 60 * 1000);
 ============================= */
 
 app.post("/register", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body || {};
 
-  if (!email || !password)
-    return res.status(400).json({ error: "Preencha tudo" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Preencha email e senha" });
+    }
 
-  const exists = users.find((u) => u.email === email);
-  if (exists)
-    return res.status(400).json({ error: "Usuário já existe" });
+    const exists = users.find((u) => u.email === email);
+    if (exists) {
+      return res.status(400).json({ error: "Usuário já existe" });
+    }
 
-  const hashed = await bcrypt.hash(password, 8);
+    const hashed = await bcrypt.hash(password, 8);
 
-  users.push({
-    email,
-    password: hashed,
-  });
+    users.push({ email, password: hashed });
 
-  res.json({ message: "Conta criada" });
+    res.json({ message: "Conta criada com sucesso" });
+  } catch (err) {
+    res.status(500).json({ error: "Erro interno" });
+  }
 });
 
 /* =============================
@@ -124,19 +123,29 @@ app.post("/register", async (req, res) => {
 ============================= */
 
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body || {};
 
-  const user = users.find((u) => u.email === email);
-  if (!user)
-    return res.status(400).json({ error: "Email inválido" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Preencha tudo" });
+    }
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid)
-    return res.status(400).json({ error: "Senha inválida" });
+    const user = users.find((u) => u.email === email);
+    if (!user) {
+      return res.status(400).json({ error: "Email inválido" });
+    }
 
-  const token = jwt.sign({ email }, JWT_SECRET);
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(400).json({ error: "Senha inválida" });
+    }
 
-  res.json({ token });
+    const token = jwt.sign({ email }, JWT_SECRET);
+
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: "Erro interno" });
+  }
 });
 
 /* =============================
@@ -144,26 +153,29 @@ app.post("/login", async (req, res) => {
 ============================= */
 
 app.post("/forgot-password", (req, res) => {
-  const { email } = req.body;
+  const { email } = req.body || {};
 
-  const user = users.find((u) => u.email === email);
-  if (!user)
-    return res.status(400).json({ error: "Email não encontrado" });
+  if (!email) {
+    return res.status(400).json({ error: "Email obrigatório" });
+  }
 
   res.json({ message: "Simulação de recuperação enviada" });
 });
 
 /* =============================
-   💳 CRIAR PAGAMENTO PIX
+   💳 CREATE PAYMENT (PIX)
 ============================= */
 
 app.post("/create-payment", async (req, res) => {
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ error: "Email obrigatório" });
+    if (!req.body || !req.body.email) {
+      console.log("BODY RECEBIDO:", req.body);
+      return res.status(400).json({
+        error: "Email obrigatório no body",
+      });
     }
+
+    const email = req.body.email;
 
     const result = await payment.create({
       body: {
@@ -185,10 +197,14 @@ app.post("/create-payment", async (req, res) => {
       pixCode:
         data.point_of_interaction.transaction_data.qr_code,
     });
-
   } catch (error) {
-    console.log("ERRO MERCADO PAGO:", error);
-    res.status(500).json({ error: "Erro pagamento" });
+    console.log("🔥 ERRO MERCADO PAGO 🔥");
+    console.log(error.response?.data || error);
+
+    res.status(500).json({
+      error: "Erro pagamento",
+      details: error.message,
+    });
   }
 });
 
@@ -210,9 +226,7 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     }
 
     res.json({ status: data.status });
-
   } catch (error) {
-    console.log("Erro check:", error);
     res.status(500).json({ error: "Erro verificar pagamento" });
   }
 });
@@ -238,7 +252,7 @@ app.get("/signals/vip", (req, res) => {
 });
 
 /* =============================
-   🚀 START SERVER
+   ROOT
 ============================= */
 
 app.get("/", (req, res) => {
@@ -246,5 +260,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log("Servidor rodando na porta", PORT);
+  console.log("🚀 Servidor rodando na porta", PORT);
 });
