@@ -1,150 +1,231 @@
 require("dotenv").config();
 const express = require("express");
-const mongoose = require("mongoose");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const fetch = require("node-fetch");
+const nodemailer = require("nodemailer");
+const { MercadoPagoConfig, Payment } = require("mercadopago");
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
-/* =========================
-   CONEXÃO MONGO
-========================= */
+const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("🔥 MongoDB conectado"))
-  .catch(err => console.error("Erro Mongo:", err));
+/* =============================
+   🧠 BANCO EM MEMÓRIA
+============================= */
 
-/* =========================
-   MODEL USUÁRIO
-========================= */
+let users = [];
 
-const userSchema = new mongoose.Schema({
-  email: String,
-  password: String,
-  vip: {
-    type: Boolean,
-    default: false
-  },
-  vip_expira_em: Date
+/* =============================
+   🔐 MERCADO PAGO
+============================= */
+
+const client = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN,
 });
 
-const User = mongoose.model("User", userSchema);
+const payment = new Payment(client);
 
-/* =========================
-   ROTA TESTE
-========================= */
+/* =============================
+   👤 REGISTER
+============================= */
 
-app.get("/", (req, res) => {
-  res.send("Backend VIP funcionando 🚀");
+app.post("/register", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password)
+      return res.status(400).json({ error: "Preencha tudo" });
+
+    const exists = users.find((u) => u.email === email);
+    if (exists)
+      return res.status(400).json({ error: "Usuário já existe" });
+
+    const hashed = await bcrypt.hash(password, 8);
+
+    users.push({
+      email,
+      password: hashed,
+      vip: false,
+      vipExpires: null,
+    });
+
+    res.json({ message: "Conta criada" });
+  } catch {
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
 });
 
-/* =========================
-   CRIAR ASSINATURA MENSAL
-========================= */
+/* =============================
+   🔐 LOGIN
+============================= */
 
-app.post("/criar-assinatura", async (req, res) => {
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = users.find((u) => u.email === email);
+    if (!user)
+      return res.status(400).json({ error: "Email inválido" });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid)
+      return res.status(400).json({ error: "Senha inválida" });
+
+    const token = jwt.sign({ email }, JWT_SECRET);
+
+    res.json({ token });
+  } catch {
+    res.status(500).json({ error: "Erro no login" });
+  }
+});
+
+/* =============================
+   🔐 RECUPERAR SENHA
+============================= */
+
+app.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
 
-    const response = await fetch("https://api.mercadopago.com/preapproval", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+    const user = users.find((u) => u.email === email);
+    if (!user)
+      return res.status(404).json({ error: "Usuário não encontrado" });
+
+    const novaSenha = Math.random().toString(36).slice(-8);
+    user.password = await bcrypt.hash(novaSenha, 8);
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
-      body: JSON.stringify({
-        reason: "VIP Mensal",
-        external_reference: email,
-        auto_recurring: {
-          frequency: 1,
-          frequency_type: "months",
-          transaction_amount: 97,
-          currency_id: "BRL",
-        },
-        back_url: "https://backend-vip.onrender.com",
-        status: "pending",
-      }),
     });
 
-    const data = await response.json();
-
-    res.json({
-      link_assinatura: data.init_point,
+    await transporter.sendMail({
+      from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Nova senha",
+      html: `<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`,
     });
+
+    res.json({ message: "Nova senha enviada." });
 
   } catch (error) {
-    console.error("Erro ao criar assinatura:", error);
-    res.status(500).json({ erro: "Erro ao criar assinatura" });
+    console.log(error);
+    res.status(500).json({ error: "Erro ao enviar e-mail" });
   }
 });
 
-/* =========================
-   WEBHOOK MERCADO PAGO
-========================= */
+/* =============================
+   💳 CRIAR PAGAMENTO (PIX + CARTÃO)
+============================= */
 
-app.post("/webhook", async (req, res) => {
-
+app.post("/create-payment", async (req, res) => {
   try {
+    const { email, method, token, installments } = req.body;
 
-    if (req.body.type === "preapproval") {
+    const user = users.find((u) => u.email === email);
+    if (!user)
+      return res.status(400).json({ error: "Usuário não encontrado" });
 
-      const subscriptionId = req.body.data.id;
+    let body = {
+      transaction_amount: 29.9,
+      description: "VIP 30 dias",
+      payer: { email },
+    };
 
-      const response = await fetch(
-        `https://api.mercadopago.com/preapproval/${subscriptionId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-          },
-        }
-      );
-
-      const subscription = await response.json();
-
-      const email = subscription.external_reference;
-
-      if (subscription.status === "authorized") {
-
-        const dataExpiracao = new Date();
-        dataExpiracao.setMonth(dataExpiracao.getMonth() + 1);
-
-        await User.findOneAndUpdate(
-          { email },
-          {
-            vip: true,
-            vip_expira_em: dataExpiracao
-          },
-          { upsert: true }
-        );
-
-        console.log("✅ VIP ativado para:", email);
-      }
-
-      if (subscription.status === "cancelled") {
-
-        await User.findOneAndUpdate(
-          { email },
-          { vip: false }
-        );
-
-        console.log("❌ VIP cancelado:", email);
-      }
+    if (method === "pix") {
+      body.payment_method_id = "pix";
     }
 
-    res.sendStatus(200);
+    if (method === "card") {
+      body.payment_method_id = "visa"; // bandeira será detectada pelo token
+      body.token = token;
+      body.installments = installments || 1;
+    }
+
+    const result = await payment.create({ body });
+
+    // Se cartão for aprovado já ativa VIP
+    if (method === "card" && result.status === "approved") {
+      user.vip = true;
+      const expiration = new Date();
+      expiration.setDate(expiration.getDate() + 30);
+      user.vipExpires = expiration;
+    }
+
+    // PIX retorna QR
+    if (method === "pix") {
+      return res.json({
+        id: result.id,
+        qrCodeBase64:
+          result.point_of_interaction.transaction_data.qr_code_base64,
+        pixCode:
+          result.point_of_interaction.transaction_data.qr_code,
+      });
+    }
+
+    res.json({ status: result.status });
 
   } catch (error) {
-    console.error("Erro webhook:", error);
-    res.sendStatus(500);
+    console.log(error);
+    res.status(500).json({ error: "Erro pagamento" });
   }
 });
 
-/* =========================
-   INICIAR SERVIDOR
-========================= */
+/* =============================
+   🔍 CHECK PIX + ATIVAR VIP
+============================= */
 
-const PORT = process.env.PORT || 10000;
+app.get("/check-payment/:id/:email", async (req, res) => {
+  try {
+    const { id, email } = req.params;
+
+    const result = await payment.get({ id });
+
+    const user = users.find((u) => u.email === email);
+
+    if (result.status === "approved" && user) {
+      user.vip = true;
+      const expiration = new Date();
+      expiration.setDate(expiration.getDate() + 30);
+      user.vipExpires = expiration;
+    }
+
+    res.json({ status: result.status });
+
+  } catch {
+    res.status(500).json({ error: "Erro verificar" });
+  }
+});
+
+/* =============================
+   👑 CHECK VIP + EXPIRAÇÃO
+============================= */
+
+app.get("/check-vip/:email", (req, res) => {
+  const user = users.find((u) => u.email === req.params.email);
+
+  if (!user) return res.json({ vip: false });
+
+  if (user.vip && user.vipExpires) {
+    if (new Date() > user.vipExpires) {
+      user.vip = false;
+      user.vipExpires = null;
+    }
+  }
+
+  res.json({
+    vip: user.vip,
+    expires: user.vipExpires,
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log("Servidor rodando na porta", PORT);
 });
