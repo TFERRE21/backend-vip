@@ -1,152 +1,136 @@
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
-const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-/* ===========================
-   🔥 CONEXÃO MONGO
-=========================== */
+const PORT = process.env.PORT || 10000;
 
-mongoose.connect(process.env.MONGO_URI)
-.then(() => console.log("🔥 MongoDB conectado"))
-.catch(err => console.log("Erro Mongo:", err));
+/* ================================
+   CONEXÃO MONGODB
+================================ */
 
-/* ===========================
-   👤 MODEL USER
-=========================== */
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("🔥 MongoDB conectado"))
+  .catch((err) => console.log("Erro Mongo:", err));
 
-const UserSchema = new mongoose.Schema({
+/* ================================
+   MODELO USUÁRIO
+================================ */
+
+const userSchema = new mongoose.Schema({
+  name: String,
   email: { type: String, unique: true },
   password: String,
-  isVip: { type: Boolean, default: false }
+  vip: { type: Boolean, default: false },
 });
 
-const User = mongoose.model("User", UserSchema);
+const User = mongoose.model("User", userSchema);
 
-/* ===========================
-   🔐 REGISTRO
-=========================== */
+/* ================================
+   ROTA RAIZ
+================================ */
 
-app.post("/register", async (req, res) => {
+app.get("/", (req, res) => {
+  res.send("Backend VIP funcionando 🚀");
+});
+
+/* ================================
+   REGISTER
+================================ */
+
+app.post("/api/register", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { name, email, password } = req.body;
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser)
-      return res.status(400).json({ error: "Usuário já existe" });
+    const userExists = await User.findOne({ email });
+    if (userExists)
+      return res.status(400).json({ message: "Email já cadastrado" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
+      name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      vip: false,
     });
 
     res.json({ message: "Usuário criado com sucesso" });
-
   } catch (err) {
-    res.status(500).json({ error: "Erro ao registrar" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/* ===========================
-   🔑 LOGIN
-=========================== */
+/* ================================
+   LOGIN
+================================ */
 
-app.post("/login", async (req, res) => {
+app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
     if (!user)
-      return res.status(400).json({ error: "Usuário não encontrado." });
+      return res.status(400).json({ message: "Usuário não encontrado" });
 
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword)
-      return res.status(400).json({ error: "Senha inválida." });
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch)
+      return res.status(400).json({ message: "Senha inválida" });
 
     const token = jwt.sign(
-      { id: user._id, isVip: user.isVip },
+      { id: user._id, vip: user.vip },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
     res.json({ token });
-
   } catch (err) {
-    res.status(500).json({ error: "Erro no login" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/* ===========================
-   🔐 RECUPERAR SENHA
-=========================== */
+/* ================================
+   MIDDLEWARE PROTEGIDO
+================================ */
 
-app.post("/forgot-password", async (req, res) => {
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader)
+    return res.status(401).json({ message: "Token não fornecido" });
+
+  const token = authHeader.split(" ")[1];
+
   try {
-    const { email } = req.body;
-
-    const user = await User.findOne({ email });
-    if (!user)
-      return res.status(400).json({ error: "Usuário não encontrado" });
-
-    const newPassword = Math.random().toString(36).slice(-8);
-    const hashed = await bcrypt.hash(newPassword, 10);
-
-    user.password = hashed;
-    await user.save();
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Nova senha - CryptoSignals",
-      text: `Sua nova senha é: ${newPassword}`
-    });
-
-    res.json({ message: "Nova senha enviada para o e-mail" });
-
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
   } catch (err) {
-    res.status(500).json({ error: "Erro ao enviar e-mail" });
+    return res.status(401).json({ message: "Token inválido" });
   }
+}
+
+/* ================================
+   ROTA PROTEGIDA VIP
+================================ */
+
+app.get("/api/vip-content", authMiddleware, (req, res) => {
+  if (!req.user.vip)
+    return res.status(403).json({ message: "Acesso apenas para VIP" });
+
+  res.json({ message: "Conteúdo VIP liberado 👑📊" });
 });
 
-/* ===========================
-   👑 ATIVAR VIP (PIX)
-=========================== */
-
-app.post("/activate-vip", async (req, res) => {
-  try {
-    const { userId } = req.body;
-
-    await User.findByIdAndUpdate(userId, { isVip: true });
-
-    res.json({ message: "VIP ativado" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao ativar VIP" });
-  }
-});
-
-/* ===========================
-   🚀 START SERVER
-=========================== */
-
-const PORT = process.env.PORT || 5000;
+/* ================================
+   START SERVER
+================================ */
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
