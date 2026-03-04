@@ -1,200 +1,144 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const nodemailer = require("nodemailer");
-const { MercadoPagoConfig, Payment } = require("mercadopago");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
+app.use(helmet());
 
-const PORT = process.env.PORT || 10000;
-const JWT_SECRET = "supersecret123";
+/* ================================
+   🔒 RATE LIMIT (ANTI BRUTE FORCE)
+================================ */
 
-/* =============================
-   🧠 BANCO EM MEMÓRIA
-============================= */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  message: { error: "Muitas solicitações. Aguarde 15 minutos." },
+});
+
+/* ================================
+   🔑 EMAIL CONFIG
+================================ */
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+/* ================================
+   🧠 BANCO SIMPLES EM MEMÓRIA
+================================ */
 
 let users = [];
-let vipUsers = [];
 
-/* =============================
-   🔐 MERCADO PAGO
-============================= */
+/* ================================
+   🔐 MIDDLEWARE AUTH
+================================ */
 
-const client = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN,
-});
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
 
-const payment = new Payment(client);
+  if (!authHeader)
+    return res.status(401).json({ error: "Token não fornecido" });
 
-/* =============================
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "supersecret");
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+}
+
+/* ================================
    👤 REGISTER
-============================= */
+================================ */
 
 app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    if (!email || !password)
-      return res.status(400).json({ error: "Preencha tudo" });
+  if (users.find((u) => u.email === email))
+    return res.status(400).json({ error: "Usuário já existe" });
 
-    const exists = users.find((u) => u.email === email);
-    if (exists)
-      return res.status(400).json({ error: "Usuário já existe" });
+  const hashedPassword = await bcrypt.hash(password, 10);
 
-    const hashed = await bcrypt.hash(password, 8);
+  users.push({
+    email,
+    password: hashedPassword,
+    isVip: false,
+  });
 
-    users.push({
-      email,
-      password: hashed,
-    });
-
-    res.json({ message: "Conta criada" });
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
+  res.json({ message: "Usuário criado com sucesso" });
 });
 
-/* =============================
+/* ================================
    🔐 LOGIN
-============================= */
+================================ */
 
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+app.post("/login", loginLimiter, async (req, res) => {
+  const { email, password } = req.body;
 
-    const user = users.find((u) => u.email === email);
-    if (!user)
-      return res.status(400).json({ error: "Email inválido" });
+  const user = users.find((u) => u.email === email);
+  if (!user)
+    return res.status(400).json({ error: "Usuário não encontrado" });
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid)
-      return res.status(400).json({ error: "Senha inválida" });
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid)
+    return res.status(400).json({ error: "Senha incorreta" });
 
-    const token = jwt.sign({ email }, JWT_SECRET);
+  const token = jwt.sign(
+    { email: user.email },
+    process.env.JWT_SECRET || "supersecret",
+    { expiresIn: "7d" }
+  );
 
-    res.json({ token });
-  } catch {
-    res.status(500).json({ error: "Erro no login" });
-  }
+  res.json({ token });
 });
 
-/* =============================
-   🔐 RECUPERAR SENHA (AJUSTADO)
-============================= */
+/* ================================
+   🔄 FORGOT PASSWORD
+================================ */
 
-app.post("/forgot-password", async (req, res) => {
-  try {
-    const { email } = req.body;
+app.post("/forgot-password", forgotLimiter, async (req, res) => {
+  const { email } = req.body;
 
-    if (!email)
-      return res.status(400).json({ error: "Email obrigatório" });
+  const user = users.find((u) => u.email === email);
+  if (!user)
+    return res.status(400).json({ error: "Usuário não encontrado" });
 
-    const user = users.find((u) => u.email === email);
+  const newPassword = Math.random().toString(36).slice(-8);
+  user.password = await bcrypt.hash(newPassword, 10);
 
-    if (!user)
-      return res.status(404).json({ error: "Usuário não encontrado" });
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: "Nova senha - CryptoSignals",
+    text: `Sua nova senha é: ${newPassword}`,
+  });
 
-    // 🔥 gerar nova senha
-    const novaSenha = Math.random().toString(36).slice(-8);
-
-    const hashed = await bcrypt.hash(novaSenha, 8);
-    user.password = hashed;
-
-    // 🔥 SMTP SEGURO GMAIL
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
-    await transporter.sendMail({
-      from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Nova senha - CryptoSignals",
-      html: `
-        <h2>Recuperação de senha</h2>
-        <p>Sua nova senha é:</p>
-        <h1>${novaSenha}</h1>
-        <p>Recomendamos alterar após login.</p>
-      `,
-    });
-
-    res.json({ message: "Nova senha enviada para o e-mail." });
-
-  } catch (error) {
-    console.log("ERRO REAL EMAIL:", error); // 🔥 agora mostra no log Render
-    res.status(500).json({ error: "Erro ao enviar e-mail" });
-  }
+  res.json({ message: "Nova senha enviada para o e-mail" });
 });
 
-/* =============================
-   💳 CRIAR PAGAMENTO PIX
-============================= */
+/* ================================
+   🚀 START
+================================ */
 
-app.post("/create-payment", async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    const result = await payment.create({
-      body: {
-        transaction_amount: 29.9,
-        description: "Acesso VIP",
-        payment_method_id: "pix",
-        payer: { email },
-      },
-    });
-
-    res.json({
-      id: result.id,
-      qrCodeBase64:
-        result.point_of_interaction.transaction_data.qr_code_base64,
-      pixCode:
-        result.point_of_interaction.transaction_data.qr_code,
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Erro pagamento" });
-  }
-});
-
-/* =============================
-   🔍 CHECK PAYMENT
-============================= */
-
-app.get("/check-payment/:id/:email", async (req, res) => {
-  try {
-    const { id, email } = req.params;
-
-    const result = await payment.get({ id });
-
-    if (result.status === "approved") {
-      if (!vipUsers.includes(email)) {
-        vipUsers.push(email);
-      }
-    }
-
-    res.json({ status: result.status });
-  } catch {
-    res.status(500).json({ error: "Erro verificar" });
-  }
-});
-
-/* =============================
-   👑 CHECK VIP
-============================= */
-
-app.get("/check-vip/:email", (req, res) => {
-  res.json({ vip: vipUsers.includes(req.params.email) });
-});
-
-app.listen(PORT, () => {
-  console.log("Servidor rodando na porta", PORT);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor rodando na porta", PORT));
