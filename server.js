@@ -7,6 +7,17 @@ const nodemailer = require("nodemailer");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
 
 const app = express();
+
+/* =============================
+   🔥 REMOVE BARRA FINAL AUTOMÁTICO
+============================= */
+app.use((req, res, next) => {
+  if (req.url.length > 1 && req.url.endsWith("/")) {
+    req.url = req.url.slice(0, -1);
+  }
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -122,7 +133,7 @@ app.post("/forgot-password", async (req, res) => {
 });
 
 /* =============================
-   💳 CRIAR PAGAMENTO (PIX + CARTÃO)
+   💳 CRIAR PAGAMENTO PIX + CARTÃO
 ============================= */
 
 app.post("/create-payment", async (req, res) => {
@@ -144,14 +155,13 @@ app.post("/create-payment", async (req, res) => {
     }
 
     if (method === "card") {
-      body.payment_method_id = "visa"; // bandeira será detectada pelo token
       body.token = token;
       body.installments = installments || 1;
+      body.payment_method_id = "visa";
     }
 
     const result = await payment.create({ body });
 
-    // Se cartão for aprovado já ativa VIP
     if (method === "card" && result.status === "approved") {
       user.vip = true;
       const expiration = new Date();
@@ -159,7 +169,6 @@ app.post("/create-payment", async (req, res) => {
       user.vipExpires = expiration;
     }
 
-    // PIX retorna QR
     if (method === "pix") {
       return res.json({
         id: result.id,
@@ -187,7 +196,6 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     const { id, email } = req.params;
 
     const result = await payment.get({ id });
-
     const user = users.find((u) => u.email === email);
 
     if (result.status === "approved" && user) {
