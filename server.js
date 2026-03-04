@@ -1,144 +1,153 @@
 require("dotenv").config();
 const express = require("express");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const nodemailer = require("nodemailer");
-const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
 
 const app = express();
-app.use(express.json());
 app.use(cors());
-app.use(helmet());
+app.use(express.json());
 
-/* ================================
-   🔒 RATE LIMIT (ANTI BRUTE FORCE)
-================================ */
+/* ===========================
+   🔥 CONEXÃO MONGO
+=========================== */
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
+mongoose.connect(process.env.MONGO_URI)
+.then(() => console.log("🔥 MongoDB conectado"))
+.catch(err => console.log("Erro Mongo:", err));
+
+/* ===========================
+   👤 MODEL USER
+=========================== */
+
+const UserSchema = new mongoose.Schema({
+  email: { type: String, unique: true },
+  password: String,
+  isVip: { type: Boolean, default: false }
 });
 
-const forgotLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 3,
-  message: { error: "Muitas solicitações. Aguarde 15 minutos." },
-});
+const User = mongoose.model("User", UserSchema);
 
-/* ================================
-   🔑 EMAIL CONFIG
-================================ */
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-/* ================================
-   🧠 BANCO SIMPLES EM MEMÓRIA
-================================ */
-
-let users = [];
-
-/* ================================
-   🔐 MIDDLEWARE AUTH
-================================ */
-
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader)
-    return res.status(401).json({ error: "Token não fornecido" });
-
-  const token = authHeader.split(" ")[1];
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "supersecret");
-    req.user = decoded;
-    next();
-  } catch {
-    return res.status(401).json({ error: "Token inválido" });
-  }
-}
-
-/* ================================
-   👤 REGISTER
-================================ */
+/* ===========================
+   🔐 REGISTRO
+=========================== */
 
 app.post("/register", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  if (users.find((u) => u.email === email))
-    return res.status(400).json({ error: "Usuário já existe" });
+    const existingUser = await User.findOne({ email });
+    if (existingUser)
+      return res.status(400).json({ error: "Usuário já existe" });
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  users.push({
-    email,
-    password: hashedPassword,
-    isVip: false,
-  });
+    const user = await User.create({
+      email,
+      password: hashedPassword
+    });
 
-  res.json({ message: "Usuário criado com sucesso" });
+    res.json({ message: "Usuário criado com sucesso" });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
 });
 
-/* ================================
-   🔐 LOGIN
-================================ */
+/* ===========================
+   🔑 LOGIN
+=========================== */
 
-app.post("/login", loginLimiter, async (req, res) => {
-  const { email, password } = req.body;
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-  const user = users.find((u) => u.email === email);
-  if (!user)
-    return res.status(400).json({ error: "Usuário não encontrado" });
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.status(400).json({ error: "Usuário não encontrado." });
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid)
-    return res.status(400).json({ error: "Senha incorreta" });
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword)
+      return res.status(400).json({ error: "Senha inválida." });
 
-  const token = jwt.sign(
-    { email: user.email },
-    process.env.JWT_SECRET || "supersecret",
-    { expiresIn: "7d" }
-  );
+    const token = jwt.sign(
+      { id: user._id, isVip: user.isVip },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-  res.json({ token });
+    res.json({ token });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro no login" });
+  }
 });
 
-/* ================================
-   🔄 FORGOT PASSWORD
-================================ */
+/* ===========================
+   🔐 RECUPERAR SENHA
+=========================== */
 
-app.post("/forgot-password", forgotLimiter, async (req, res) => {
-  const { email } = req.body;
+app.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
 
-  const user = users.find((u) => u.email === email);
-  if (!user)
-    return res.status(400).json({ error: "Usuário não encontrado" });
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.status(400).json({ error: "Usuário não encontrado" });
 
-  const newPassword = Math.random().toString(36).slice(-8);
-  user.password = await bcrypt.hash(newPassword, 10);
+    const newPassword = Math.random().toString(36).slice(-8);
+    const hashed = await bcrypt.hash(newPassword, 10);
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: "Nova senha - CryptoSignals",
-    text: `Sua nova senha é: ${newPassword}`,
-  });
+    user.password = hashed;
+    await user.save();
 
-  res.json({ message: "Nova senha enviada para o e-mail" });
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Nova senha - CryptoSignals",
+      text: `Sua nova senha é: ${newPassword}`
+    });
+
+    res.json({ message: "Nova senha enviada para o e-mail" });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao enviar e-mail" });
+  }
 });
 
-/* ================================
-   🚀 START
-================================ */
+/* ===========================
+   👑 ATIVAR VIP (PIX)
+=========================== */
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor rodando na porta", PORT));
+app.post("/activate-vip", async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    await User.findByIdAndUpdate(userId, { isVip: true });
+
+    res.json({ message: "VIP ativado" });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao ativar VIP" });
+  }
+});
+
+/* ===========================
+   🚀 START SERVER
+=========================== */
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+});
