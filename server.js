@@ -4,7 +4,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const { MercadoPagoConfig, Payment } = require("mercadopago");
+const { MercadoPagoConfig, Payment, Preference } = require("mercadopago");
 
 const app = express();
 
@@ -30,13 +30,14 @@ const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 let users = [];
 
 /* =============================
-   MERCADO PAGO
+   MERCADO PAGO CONFIG
 ============================= */
 const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
 });
 
 const payment = new Payment(client);
+const preference = new Preference(client);
 
 /* =============================
    REGISTER
@@ -62,6 +63,7 @@ app.post("/register", async (req, res) => {
     });
 
     res.json({ message: "Conta criada com sucesso" });
+
   } catch (error) {
     console.log("ERRO REGISTER:", error);
     res.status(500).json({ error: "Erro ao registrar" });
@@ -86,6 +88,7 @@ app.post("/login", async (req, res) => {
     const token = jwt.sign({ email }, JWT_SECRET);
 
     res.json({ token });
+
   } catch (error) {
     console.log("ERRO LOGIN:", error);
     res.status(500).json({ error: "Erro no login" });
@@ -122,6 +125,7 @@ app.post("/forgot-password", async (req, res) => {
     });
 
     res.json({ message: "Nova senha enviada por e-mail." });
+
   } catch (error) {
     console.log("ERRO EMAIL:", error);
     res.status(500).json({ error: "Erro ao enviar e-mail" });
@@ -129,60 +133,35 @@ app.post("/forgot-password", async (req, res) => {
 });
 
 /* =============================
-   CRIAR PAGAMENTO PIX + CARTÃO
+   PIX (30 DIAS)
 ============================= */
 app.post("/create-payment", async (req, res) => {
   try {
-    const { email, method, token, installments } = req.body;
+    const { email } = req.body;
 
     if (!email)
       return res.status(400).json({ error: "Email obrigatório" });
 
-    // 🔥 Se não enviar método assume PIX automaticamente
-    const paymentMethod = method || "pix";
+    const result = await payment.create({
+      body: {
+        transaction_amount: 29.9,
+        description: "VIP 30 dias",
+        payment_method_id: "pix",
+        payer: { email },
+      },
+    });
 
-    let body = {
-      transaction_amount: 29.9,
-      description: "VIP 30 dias",
-      payer: { email },
-    };
-
-    if (paymentMethod === "pix") {
-      body.payment_method_id = "pix";
-    } 
-    else if (paymentMethod === "card") {
-      if (!token)
-        return res.status(400).json({ error: "Token do cartão obrigatório" });
-
-      body.token = token;
-      body.installments = installments || 1;
-      body.payment_method_id = "visa";
-    } 
-    else {
-      return res.status(400).json({ error: "Método inválido" });
-    }
-
-    const result = await payment.create({ body });
-
-    if (paymentMethod === "pix") {
-      return res.json({
-        id: result.id,
-        qrCodeBase64:
-          result.point_of_interaction?.transaction_data?.qr_code_base64,
-        pixCode:
-          result.point_of_interaction?.transaction_data?.qr_code,
-      });
-    }
-
-    if (result.status === "approved") {
-      activateVip(email);
-    }
-
-    res.json({ status: result.status });
+    res.json({
+      id: result.id,
+      qrCodeBase64:
+        result.point_of_interaction?.transaction_data?.qr_code_base64,
+      pixCode:
+        result.point_of_interaction?.transaction_data?.qr_code,
+    });
 
   } catch (error) {
-    console.log("ERRO PAGAMENTO:", error.response?.data || error);
-    res.status(500).json({ error: "Erro pagamento" });
+    console.log("ERRO PIX:", error.response?.data || error);
+    res.status(500).json({ error: "Erro pagamento PIX" });
   }
 });
 
@@ -200,9 +179,75 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     }
 
     res.json({ status: result.status });
+
   } catch (error) {
-    console.log("ERRO CHECK:", error);
+    console.log("ERRO CHECK PIX:", error);
     res.status(500).json({ error: "Erro verificar pagamento" });
+  }
+});
+
+/* =============================
+   CHECKOUT PRO (CARTÃO)
+============================= */
+app.post("/create-checkout", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email)
+      return res.status(400).json({ error: "Email obrigatório" });
+
+    const result = await preference.create({
+      body: {
+        items: [
+          {
+            title: "VIP 30 dias",
+            quantity: 1,
+            currency_id: "BRL",
+            unit_price: 29.9,
+          },
+        ],
+        payer: { email },
+        back_urls: {
+          success: "https://backend-vip.onrender.com/success",
+          failure: "https://backend-vip.onrender.com/failure",
+          pending: "https://backend-vip.onrender.com/pending",
+        },
+        auto_return: "approved",
+        notification_url:
+          "https://backend-vip.onrender.com/webhook",
+      },
+    });
+
+    res.json({ init_point: result.init_point });
+
+  } catch (error) {
+    console.log("ERRO CHECKOUT:", error.response?.data || error);
+    res.status(500).json({ error: "Erro ao criar checkout" });
+  }
+});
+
+/* =============================
+   WEBHOOK MERCADO PAGO
+============================= */
+app.post("/webhook", async (req, res) => {
+  try {
+    const { type, data } = req.body;
+
+    if (type === "payment") {
+      const paymentInfo = await payment.get({ id: data.id });
+
+      if (paymentInfo.status === "approved") {
+        const email = paymentInfo.payer.email;
+        activateVip(email);
+        console.log("VIP ativado via Checkout Pro:", email);
+      }
+    }
+
+    res.sendStatus(200);
+
+  } catch (error) {
+    console.log("ERRO WEBHOOK:", error);
+    res.sendStatus(500);
   }
 });
 
