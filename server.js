@@ -9,7 +9,7 @@ const { MercadoPagoConfig, Payment } = require("mercadopago");
 const app = express();
 
 /* =============================
-   🔥 REMOVE BARRA FINAL AUTOMÁTICO
+   REMOVE BARRA FINAL AUTOMÁTICO
 ============================= */
 app.use((req, res, next) => {
   if (req.url.length > 1 && req.url.endsWith("/")) {
@@ -25,15 +25,13 @@ const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 
 /* =============================
-   🧠 BANCO EM MEMÓRIA (TEMPORÁRIO)
+   BANCO EM MEMÓRIA (TEMPORÁRIO)
 ============================= */
-
 let users = [];
 
 /* =============================
-   🔐 MERCADO PAGO
+   MERCADO PAGO
 ============================= */
-
 const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
 });
@@ -41,9 +39,8 @@ const client = new MercadoPagoConfig({
 const payment = new Payment(client);
 
 /* =============================
-   👤 REGISTER
+   REGISTER
 ============================= */
-
 app.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -65,7 +62,6 @@ app.post("/register", async (req, res) => {
     });
 
     res.json({ message: "Conta criada com sucesso" });
-
   } catch (error) {
     console.log("ERRO REGISTER:", error);
     res.status(500).json({ error: "Erro ao registrar" });
@@ -73,9 +69,8 @@ app.post("/register", async (req, res) => {
 });
 
 /* =============================
-   🔐 LOGIN
+   LOGIN
 ============================= */
-
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -91,7 +86,6 @@ app.post("/login", async (req, res) => {
     const token = jwt.sign({ email }, JWT_SECRET);
 
     res.json({ token });
-
   } catch (error) {
     console.log("ERRO LOGIN:", error);
     res.status(500).json({ error: "Erro no login" });
@@ -99,9 +93,8 @@ app.post("/login", async (req, res) => {
 });
 
 /* =============================
-   🔐 RECUPERAR SENHA
+   RECUPERAR SENHA
 ============================= */
-
 app.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
@@ -129,7 +122,6 @@ app.post("/forgot-password", async (req, res) => {
     });
 
     res.json({ message: "Nova senha enviada por e-mail." });
-
   } catch (error) {
     console.log("ERRO EMAIL:", error);
     res.status(500).json({ error: "Erro ao enviar e-mail" });
@@ -137,9 +129,8 @@ app.post("/forgot-password", async (req, res) => {
 });
 
 /* =============================
-   💳 CRIAR PAGAMENTO PIX + CARTÃO
+   CRIAR PAGAMENTO PIX + CARTÃO
 ============================= */
-
 app.post("/create-payment", async (req, res) => {
   try {
     const { email, method, token, installments } = req.body;
@@ -147,8 +138,8 @@ app.post("/create-payment", async (req, res) => {
     if (!email)
       return res.status(400).json({ error: "Email obrigatório" });
 
-    if (!method)
-      return res.status(400).json({ error: "Método obrigatório" });
+    // 🔥 Se não enviar método assume PIX automaticamente
+    const paymentMethod = method || "pix";
 
     let body = {
       transaction_amount: 29.9,
@@ -156,26 +147,24 @@ app.post("/create-payment", async (req, res) => {
       payer: { email },
     };
 
-    if (method === "pix") {
+    if (paymentMethod === "pix") {
       body.payment_method_id = "pix";
-    }
-
-    else if (method === "card") {
+    } 
+    else if (paymentMethod === "card") {
       if (!token)
         return res.status(400).json({ error: "Token do cartão obrigatório" });
 
       body.token = token;
       body.installments = installments || 1;
       body.payment_method_id = "visa";
-    }
-
+    } 
     else {
       return res.status(400).json({ error: "Método inválido" });
     }
 
     const result = await payment.create({ body });
 
-    if (method === "pix") {
+    if (paymentMethod === "pix") {
       return res.json({
         id: result.id,
         qrCodeBase64:
@@ -198,9 +187,8 @@ app.post("/create-payment", async (req, res) => {
 });
 
 /* =============================
-   🔍 CHECK PIX
+   CHECK PIX
 ============================= */
-
 app.get("/check-payment/:id/:email", async (req, res) => {
   try {
     const { id, email } = req.params;
@@ -212,7 +200,6 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     }
 
     res.json({ status: result.status });
-
   } catch (error) {
     console.log("ERRO CHECK:", error);
     res.status(500).json({ error: "Erro verificar pagamento" });
@@ -220,9 +207,8 @@ app.get("/check-payment/:id/:email", async (req, res) => {
 });
 
 /* =============================
-   👑 CHECK VIP
+   CHECK VIP
 ============================= */
-
 app.get("/check-vip/:email", (req, res) => {
   const user = users.find((u) => u.email === req.params.email);
 
@@ -243,9 +229,8 @@ app.get("/check-vip/:email", (req, res) => {
 });
 
 /* =============================
-   🔥 FUNÇÃO ATIVAR VIP 30 DIAS
+   ATIVAR VIP 30 DIAS
 ============================= */
-
 function activateVip(email) {
   const user = users.find((u) => u.email === email);
   if (!user) return;
@@ -257,9 +242,8 @@ function activateVip(email) {
 }
 
 /* =============================
-   🚀 SERVER
+   ROOT
 ============================= */
-
 app.get("/", (req, res) => {
   res.send("Backend VIP funcionando 🚀");
 });
