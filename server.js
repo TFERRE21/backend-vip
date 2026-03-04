@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 
 /* =============================
-   🧠 BANCO EM MEMÓRIA
+   🧠 BANCO EM MEMÓRIA (TEMPORÁRIO)
 ============================= */
 
 let users = [];
@@ -64,8 +64,10 @@ app.post("/register", async (req, res) => {
       vipExpires: null,
     });
 
-    res.json({ message: "Conta criada" });
-  } catch {
+    res.json({ message: "Conta criada com sucesso" });
+
+  } catch (error) {
+    console.log("ERRO REGISTER:", error);
     res.status(500).json({ error: "Erro ao registrar" });
   }
 });
@@ -89,7 +91,9 @@ app.post("/login", async (req, res) => {
     const token = jwt.sign({ email }, JWT_SECRET);
 
     res.json({ token });
-  } catch {
+
+  } catch (error) {
+    console.log("ERRO LOGIN:", error);
     res.status(500).json({ error: "Erro no login" });
   }
 });
@@ -124,10 +128,10 @@ app.post("/forgot-password", async (req, res) => {
       html: `<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`,
     });
 
-    res.json({ message: "Nova senha enviada." });
+    res.json({ message: "Nova senha enviada por e-mail." });
 
   } catch (error) {
-    console.log(error);
+    console.log("ERRO EMAIL:", error);
     res.status(500).json({ error: "Erro ao enviar e-mail" });
   }
 });
@@ -140,9 +144,11 @@ app.post("/create-payment", async (req, res) => {
   try {
     const { email, method, token, installments } = req.body;
 
-    const user = users.find((u) => u.email === email);
-    if (!user)
-      return res.status(400).json({ error: "Usuário não encontrado" });
+    if (!email)
+      return res.status(400).json({ error: "Email obrigatório" });
+
+    if (!method)
+      return res.status(400).json({ error: "Método obrigatório" });
 
     let body = {
       transaction_amount: 29.9,
@@ -154,41 +160,45 @@ app.post("/create-payment", async (req, res) => {
       body.payment_method_id = "pix";
     }
 
-    if (method === "card") {
+    else if (method === "card") {
+      if (!token)
+        return res.status(400).json({ error: "Token do cartão obrigatório" });
+
       body.token = token;
       body.installments = installments || 1;
       body.payment_method_id = "visa";
     }
 
-    const result = await payment.create({ body });
-
-    if (method === "card" && result.status === "approved") {
-      user.vip = true;
-      const expiration = new Date();
-      expiration.setDate(expiration.getDate() + 30);
-      user.vipExpires = expiration;
+    else {
+      return res.status(400).json({ error: "Método inválido" });
     }
+
+    const result = await payment.create({ body });
 
     if (method === "pix") {
       return res.json({
         id: result.id,
         qrCodeBase64:
-          result.point_of_interaction.transaction_data.qr_code_base64,
+          result.point_of_interaction?.transaction_data?.qr_code_base64,
         pixCode:
-          result.point_of_interaction.transaction_data.qr_code,
+          result.point_of_interaction?.transaction_data?.qr_code,
       });
+    }
+
+    if (result.status === "approved") {
+      activateVip(email);
     }
 
     res.json({ status: result.status });
 
   } catch (error) {
-    console.log(error);
+    console.log("ERRO PAGAMENTO:", error.response?.data || error);
     res.status(500).json({ error: "Erro pagamento" });
   }
 });
 
 /* =============================
-   🔍 CHECK PIX + ATIVAR VIP
+   🔍 CHECK PIX
 ============================= */
 
 app.get("/check-payment/:id/:email", async (req, res) => {
@@ -196,30 +206,28 @@ app.get("/check-payment/:id/:email", async (req, res) => {
     const { id, email } = req.params;
 
     const result = await payment.get({ id });
-    const user = users.find((u) => u.email === email);
 
-    if (result.status === "approved" && user) {
-      user.vip = true;
-      const expiration = new Date();
-      expiration.setDate(expiration.getDate() + 30);
-      user.vipExpires = expiration;
+    if (result.status === "approved") {
+      activateVip(email);
     }
 
     res.json({ status: result.status });
 
-  } catch {
-    res.status(500).json({ error: "Erro verificar" });
+  } catch (error) {
+    console.log("ERRO CHECK:", error);
+    res.status(500).json({ error: "Erro verificar pagamento" });
   }
 });
 
 /* =============================
-   👑 CHECK VIP + EXPIRAÇÃO
+   👑 CHECK VIP
 ============================= */
 
 app.get("/check-vip/:email", (req, res) => {
   const user = users.find((u) => u.email === req.params.email);
 
-  if (!user) return res.json({ vip: false });
+  if (!user)
+    return res.json({ vip: false });
 
   if (user.vip && user.vipExpires) {
     if (new Date() > user.vipExpires) {
@@ -232,6 +240,28 @@ app.get("/check-vip/:email", (req, res) => {
     vip: user.vip,
     expires: user.vipExpires,
   });
+});
+
+/* =============================
+   🔥 FUNÇÃO ATIVAR VIP 30 DIAS
+============================= */
+
+function activateVip(email) {
+  const user = users.find((u) => u.email === email);
+  if (!user) return;
+
+  user.vip = true;
+  const expiration = new Date();
+  expiration.setDate(expiration.getDate() + 30);
+  user.vipExpires = expiration;
+}
+
+/* =============================
+   🚀 SERVER
+============================= */
+
+app.get("/", (req, res) => {
+  res.send("Backend VIP funcionando 🚀");
 });
 
 app.listen(PORT, () => {
