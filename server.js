@@ -9,7 +9,7 @@ const { MercadoPagoConfig, Payment, Preference } = require("mercadopago");
 const app = express();
 
 /* =============================
-   REMOVE BARRA FINAL AUTOMÁTICO
+REMOVE BARRA FINAL AUTOMÁTICO
 ============================= */
 app.use((req, res, next) => {
   if (req.url.length > 1 && req.url.endsWith("/")) {
@@ -25,12 +25,12 @@ const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
 
 /* =============================
-   BANCO EM MEMÓRIA (TEMPORÁRIO)
+BANCO EM MEMÓRIA
 ============================= */
 let users = [];
 
 /* =============================
-   MERCADO PAGO CONFIG
+MERCADO PAGO
 ============================= */
 const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
@@ -40,16 +40,20 @@ const payment = new Payment(client);
 const preference = new Preference(client);
 
 /* =============================
-   REGISTER
+REGISTER
 ============================= */
 app.post("/register", async (req, res) => {
   try {
-    const { email, password } = req.body;
+
+    let { email, password } = req.body;
 
     if (!email || !password)
       return res.status(400).json({ error: "Preencha tudo" });
 
+    email = email.toLowerCase().trim();
+
     const exists = users.find((u) => u.email === email);
+
     if (exists)
       return res.status(400).json({ error: "Usuário já existe" });
 
@@ -71,17 +75,25 @@ app.post("/register", async (req, res) => {
 });
 
 /* =============================
-   LOGIN
+LOGIN
 ============================= */
 app.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+
+    let { email, password } = req.body;
+
+    if (!email || !password)
+      return res.status(400).json({ error: "Preencha email e senha" });
+
+    email = email.toLowerCase().trim();
 
     const user = users.find((u) => u.email === email);
+
     if (!user)
       return res.status(400).json({ error: "Email inválido" });
 
     const valid = await bcrypt.compare(password, user.password);
+
     if (!valid)
       return res.status(400).json({ error: "Senha inválida" });
 
@@ -96,17 +108,22 @@ app.post("/login", async (req, res) => {
 });
 
 /* =============================
-   RECUPERAR SENHA
+RECUPERAR SENHA
 ============================= */
 app.post("/forgot-password", async (req, res) => {
   try {
-    const { email } = req.body;
+
+    let { email } = req.body;
+
+    email = email.toLowerCase().trim();
 
     const user = users.find((u) => u.email === email);
+
     if (!user)
       return res.status(404).json({ error: "Usuário não encontrado" });
 
     const novaSenha = Math.random().toString(36).slice(-8);
+
     user.password = await bcrypt.hash(novaSenha, 8);
 
     const transporter = nodemailer.createTransport({
@@ -133,10 +150,11 @@ app.post("/forgot-password", async (req, res) => {
 });
 
 /* =============================
-   PIX (30 DIAS)
+PIX 30 DIAS
 ============================= */
 app.post("/create-payment", async (req, res) => {
   try {
+
     const { email } = req.body;
 
     if (!email)
@@ -166,10 +184,11 @@ app.post("/create-payment", async (req, res) => {
 });
 
 /* =============================
-   CHECK PIX
+CHECK PIX
 ============================= */
 app.get("/check-payment/:id/:email", async (req, res) => {
   try {
+
     const { id, email } = req.params;
 
     const result = await payment.get({ id });
@@ -187,10 +206,11 @@ app.get("/check-payment/:id/:email", async (req, res) => {
 });
 
 /* =============================
-   CHECKOUT PRO (CARTÃO)
+CHECKOUT PRO CARTÃO
 ============================= */
 app.post("/create-checkout", async (req, res) => {
   try {
+
     const { email } = req.body;
 
     if (!email)
@@ -227,20 +247,27 @@ app.post("/create-checkout", async (req, res) => {
 });
 
 /* =============================
-   WEBHOOK MERCADO PAGO
+WEBHOOK
 ============================= */
 app.post("/webhook", async (req, res) => {
   try {
+
     const { type, data } = req.body;
 
     if (type === "payment") {
+
       const paymentInfo = await payment.get({ id: data.id });
 
       if (paymentInfo.status === "approved") {
+
         const email = paymentInfo.payer.email;
+
         activateVip(email);
-        console.log("VIP ativado via Checkout Pro:", email);
+
+        console.log("VIP ativado:", email);
+
       }
+
     }
 
     res.sendStatus(200);
@@ -252,9 +279,10 @@ app.post("/webhook", async (req, res) => {
 });
 
 /* =============================
-   CHECK VIP
+CHECK VIP
 ============================= */
 app.get("/check-vip/:email", (req, res) => {
+
   const user = users.find((u) => u.email === req.params.email);
 
   if (!user)
@@ -271,23 +299,30 @@ app.get("/check-vip/:email", (req, res) => {
     vip: user.vip,
     expires: user.vipExpires,
   });
+
 });
 
 /* =============================
-   ATIVAR VIP 30 DIAS
+ATIVAR VIP
 ============================= */
 function activateVip(email) {
+
   const user = users.find((u) => u.email === email);
+
   if (!user) return;
 
   user.vip = true;
+
   const expiration = new Date();
+
   expiration.setDate(expiration.getDate() + 30);
+
   user.vipExpires = expiration;
+
 }
 
 /* =============================
-   ROOT
+ROOT
 ============================= */
 app.get("/", (req, res) => {
   res.send("Backend VIP funcionando 🚀");
