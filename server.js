@@ -4,330 +4,466 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
+const mongoose = require("mongoose");
 const { MercadoPagoConfig, Payment, Preference } = require("mercadopago");
 
 const app = express();
 
 /* =============================
-REMOVE BARRA FINAL AUTOMÁTICO
+MONGODB
 ============================= */
-app.use((req, res, next) => {
-  if (req.url.length > 1 && req.url.endsWith("/")) {
-    req.url = req.url.slice(0, -1);
-  }
-  next();
-});
 
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 10000;
-const JWT_SECRET = process.env.JWT_SECRET || "supersecret123";
+mongoose.connect(process.env.MONGO_URI,{
+useNewUrlParser:true,
+useUnifiedTopology:true
+})
+.then(()=>console.log("MongoDB conectado"))
+.catch(err=>console.log(err))
 
 /* =============================
-BANCO EM MEMÓRIA
+USER MODEL
 ============================= */
-let users = [];
+
+const User = mongoose.model("User",{
+
+email:String,
+password:String,
+vip:Boolean,
+vipExpires:Date
+
+})
+
+/* =============================
+REMOVE BARRA FINAL
+============================= */
+
+app.use((req,res,next)=>{
+if(req.url.length>1 && req.url.endsWith("/")){
+req.url=req.url.slice(0,-1)
+}
+next()
+})
+
+app.use(cors())
+app.use(express.json())
+
+const PORT = process.env.PORT || 10000
+const JWT_SECRET = process.env.JWT_SECRET || "supersecret123"
 
 /* =============================
 MERCADO PAGO
 ============================= */
-const client = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN,
-});
 
-const payment = new Payment(client);
-const preference = new Preference(client);
+const client = new MercadoPagoConfig({
+accessToken:process.env.MP_ACCESS_TOKEN
+})
+
+const payment = new Payment(client)
+const preference = new Preference(client)
 
 /* =============================
 REGISTER
 ============================= */
-app.post("/register", async (req, res) => {
-  try {
 
-    let { email, password } = req.body;
+app.post("/register",async(req,res)=>{
 
-    if (!email || !password)
-      return res.status(400).json({ error: "Preencha tudo" });
+try{
 
-    email = email.toLowerCase().trim();
+let {email,password}=req.body
 
-    const exists = users.find((u) => u.email === email);
+if(!email || !password)
+return res.status(400).json({error:"Preencha tudo"})
 
-    if (exists)
-      return res.status(400).json({ error: "Usuário já existe" });
+email=email.toLowerCase().trim()
 
-    const hashed = await bcrypt.hash(password, 8);
+const exists=await User.findOne({email})
 
-    users.push({
-      email,
-      password: hashed,
-      vip: false,
-      vipExpires: null,
-    });
+if(exists)
+return res.status(400).json({error:"Usuário já existe"})
 
-    res.json({ message: "Conta criada com sucesso" });
+const hashed=await bcrypt.hash(password,8)
 
-  } catch (error) {
-    console.log("ERRO REGISTER:", error);
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
-});
+await User.create({
+
+email,
+password:hashed,
+vip:false,
+vipExpires:null
+
+})
+
+res.json({message:"Conta criada com sucesso"})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro ao registrar"})
+
+}
+
+})
 
 /* =============================
 LOGIN
 ============================= */
-app.post("/login", async (req, res) => {
-  try {
 
-    let { email, password } = req.body;
+app.post("/login",async(req,res)=>{
 
-    if (!email || !password)
-      return res.status(400).json({ error: "Preencha email e senha" });
+try{
 
-    email = email.toLowerCase().trim();
+let {email,password}=req.body
 
-    const user = users.find((u) => u.email === email);
+if(!email || !password)
+return res.status(400).json({error:"Preencha email e senha"})
 
-    if (!user)
-      return res.status(400).json({ error: "Email inválido" });
+email=email.toLowerCase().trim()
 
-    const valid = await bcrypt.compare(password, user.password);
+const user=await User.findOne({email})
 
-    if (!valid)
-      return res.status(400).json({ error: "Senha inválida" });
+if(!user)
+return res.status(400).json({error:"Email inválido"})
 
-    const token = jwt.sign({ email }, JWT_SECRET);
+const valid=await bcrypt.compare(password,user.password)
 
-    res.json({ token });
+if(!valid)
+return res.status(400).json({error:"Senha inválida"})
 
-  } catch (error) {
-    console.log("ERRO LOGIN:", error);
-    res.status(500).json({ error: "Erro no login" });
-  }
-});
+const token=jwt.sign({email},JWT_SECRET,{expiresIn:"30d"})
+
+res.json({token})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro no login"})
+
+}
+
+})
 
 /* =============================
 RECUPERAR SENHA
 ============================= */
-app.post("/forgot-password", async (req, res) => {
-  try {
 
-    let { email } = req.body;
+app.post("/forgot-password",async(req,res)=>{
 
-    email = email.toLowerCase().trim();
+try{
 
-    const user = users.find((u) => u.email === email);
+let {email}=req.body
 
-    if (!user)
-      return res.status(404).json({ error: "Usuário não encontrado" });
+email=email.toLowerCase().trim()
 
-    const novaSenha = Math.random().toString(36).slice(-8);
+const user=await User.findOne({email})
 
-    user.password = await bcrypt.hash(novaSenha, 8);
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+const novaSenha=Math.random().toString(36).slice(-8)
 
-    await transporter.sendMail({
-      from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Nova senha",
-      html: `<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`,
-    });
+user.password=await bcrypt.hash(novaSenha,8)
 
-    res.json({ message: "Nova senha enviada por e-mail." });
+await user.save()
 
-  } catch (error) {
-    console.log("ERRO EMAIL:", error);
-    res.status(500).json({ error: "Erro ao enviar e-mail" });
-  }
-});
+const transporter=nodemailer.createTransport({
+
+service:"gmail",
+
+auth:{
+user:process.env.EMAIL_USER,
+pass:process.env.EMAIL_PASS
+}
+
+})
+
+await transporter.sendMail({
+
+from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
+to:email,
+subject:"Nova senha",
+html:`<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`
+
+})
+
+res.json({message:"Nova senha enviada por e-mail."})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro ao enviar e-mail"})
+
+}
+
+})
+
+/* =============================
+ALTERAR SENHA
+============================= */
+
+app.post("/change-password",async(req,res)=>{
+
+try{
+
+let {email,oldPassword,newPassword}=req.body
+
+email=email.toLowerCase().trim()
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+const valid=await bcrypt.compare(oldPassword,user.password)
+
+if(!valid)
+return res.status(400).json({error:"Senha atual incorreta"})
+
+user.password=await bcrypt.hash(newPassword,8)
+
+await user.save()
+
+res.json({message:"Senha alterada com sucesso"})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro ao alterar senha"})
+
+}
+
+})
 
 /* =============================
 PIX 30 DIAS
 ============================= */
-app.post("/create-payment", async (req, res) => {
-  try {
 
-    const { email } = req.body;
+app.post("/create-payment",async(req,res)=>{
 
-    if (!email)
-      return res.status(400).json({ error: "Email obrigatório" });
+try{
 
-    const result = await payment.create({
-      body: {
-        transaction_amount: 29.9,
-        description: "VIP 30 dias",
-        payment_method_id: "pix",
-        payer: { email },
-      },
-    });
+const {email}=req.body
 
-    res.json({
-      id: result.id,
-      qrCodeBase64:
-        result.point_of_interaction?.transaction_data?.qr_code_base64,
-      pixCode:
-        result.point_of_interaction?.transaction_data?.qr_code,
-    });
+if(!email)
+return res.status(400).json({error:"Email obrigatório"})
 
-  } catch (error) {
-    console.log("ERRO PIX:", error.response?.data || error);
-    res.status(500).json({ error: "Erro pagamento PIX" });
-  }
-});
+const result=await payment.create({
+
+body:{
+transaction_amount:29.9,
+description:"VIP 30 dias",
+payment_method_id:"pix",
+payer:{email}
+}
+
+})
+
+res.json({
+
+id:result.id,
+
+qrCodeBase64:
+result.point_of_interaction?.transaction_data?.qr_code_base64,
+
+pixCode:
+result.point_of_interaction?.transaction_data?.qr_code
+
+})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro pagamento PIX"})
+
+}
+
+})
 
 /* =============================
 CHECK PIX
 ============================= */
-app.get("/check-payment/:id/:email", async (req, res) => {
-  try {
 
-    const { id, email } = req.params;
+app.get("/check-payment/:id/:email",async(req,res)=>{
 
-    const result = await payment.get({ id });
+try{
 
-    if (result.status === "approved") {
-      activateVip(email);
-    }
+const {id,email}=req.params
 
-    res.json({ status: result.status });
+const result=await payment.get({id})
 
-  } catch (error) {
-    console.log("ERRO CHECK PIX:", error);
-    res.status(500).json({ error: "Erro verificar pagamento" });
-  }
-});
+if(result.status==="approved"){
+
+activateVip(email)
+
+}
+
+res.json({status:result.status})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro verificar pagamento"})
+
+}
+
+})
 
 /* =============================
 CHECKOUT PRO CARTÃO
 ============================= */
-app.post("/create-checkout", async (req, res) => {
-  try {
 
-    const { email } = req.body;
+app.post("/create-checkout",async(req,res)=>{
 
-    if (!email)
-      return res.status(400).json({ error: "Email obrigatório" });
+try{
 
-    const result = await preference.create({
-      body: {
-        items: [
-          {
-            title: "VIP 30 dias",
-            quantity: 1,
-            currency_id: "BRL",
-            unit_price: 29.9,
-          },
-        ],
-        payer: { email },
-        back_urls: {
-          success: "https://backend-vip.onrender.com/success",
-          failure: "https://backend-vip.onrender.com/failure",
-          pending: "https://backend-vip.onrender.com/pending",
-        },
-        auto_return: "approved",
-        notification_url:
-          "https://backend-vip.onrender.com/webhook",
-      },
-    });
+const {email}=req.body
 
-    res.json({ init_point: result.init_point });
+const result=await preference.create({
 
-  } catch (error) {
-    console.log("ERRO CHECKOUT:", error.response?.data || error);
-    res.status(500).json({ error: "Erro ao criar checkout" });
-  }
-});
+body:{
+
+items:[{
+
+title:"VIP 30 dias",
+quantity:1,
+currency_id:"BRL",
+unit_price:29.9
+
+}],
+
+payer:{email},
+
+back_urls:{
+
+success:"https://backend-vip.onrender.com/success",
+failure:"https://backend-vip.onrender.com/failure",
+pending:"https://backend-vip.onrender.com/pending"
+
+},
+
+auto_return:"approved",
+
+notification_url:
+"https://backend-vip.onrender.com/webhook"
+
+}
+
+})
+
+res.json({init_point:result.init_point})
+
+}catch(error){
+
+console.log(error)
+res.status(500).json({error:"Erro ao criar checkout"})
+
+}
+
+})
 
 /* =============================
 WEBHOOK
 ============================= */
-app.post("/webhook", async (req, res) => {
-  try {
 
-    const { type, data } = req.body;
+app.post("/webhook",async(req,res)=>{
 
-    if (type === "payment") {
+try{
 
-      const paymentInfo = await payment.get({ id: data.id });
+const {type,data}=req.body
 
-      if (paymentInfo.status === "approved") {
+if(type==="payment"){
 
-        const email = paymentInfo.payer.email;
+const paymentInfo=await payment.get({id:data.id})
 
-        activateVip(email);
+if(paymentInfo.status==="approved"){
 
-        console.log("VIP ativado:", email);
+const email=paymentInfo.payer.email
 
-      }
+activateVip(email)
 
-    }
+}
 
-    res.sendStatus(200);
+}
 
-  } catch (error) {
-    console.log("ERRO WEBHOOK:", error);
-    res.sendStatus(500);
-  }
-});
+res.sendStatus(200)
+
+}catch(error){
+
+console.log(error)
+res.sendStatus(500)
+
+}
+
+})
 
 /* =============================
 CHECK VIP
 ============================= */
-app.get("/check-vip/:email", (req, res) => {
 
-  const user = users.find((u) => u.email === req.params.email);
+app.get("/check-vip/:email",async(req,res)=>{
 
-  if (!user)
-    return res.json({ vip: false });
+const email=req.params.email.toLowerCase().trim()
 
-  if (user.vip && user.vipExpires) {
-    if (new Date() > user.vipExpires) {
-      user.vip = false;
-      user.vipExpires = null;
-    }
-  }
+const user=await User.findOne({email})
 
-  res.json({
-    vip: user.vip,
-    expires: user.vipExpires,
-  });
+if(!user)
+return res.json({vip:false})
 
-});
+if(user.vip && user.vipExpires){
+
+if(new Date()>user.vipExpires){
+
+user.vip=false
+user.vipExpires=null
+await user.save()
+
+}
+
+}
+
+res.json({
+
+vip:user.vip,
+expires:user.vipExpires
+
+})
+
+})
 
 /* =============================
 ATIVAR VIP
 ============================= */
-function activateVip(email) {
 
-  const user = users.find((u) => u.email === email);
+async function activateVip(email){
 
-  if (!user) return;
+email=email.toLowerCase().trim()
 
-  user.vip = true;
+const user=await User.findOne({email})
 
-  const expiration = new Date();
+if(!user) return
 
-  expiration.setDate(expiration.getDate() + 30);
+user.vip=true
 
-  user.vipExpires = expiration;
+const expiration=new Date()
+
+expiration.setDate(expiration.getDate()+30)
+
+user.vipExpires=expiration
+
+await user.save()
 
 }
 
 /* =============================
 ROOT
 ============================= */
-app.get("/", (req, res) => {
-  res.send("Backend VIP funcionando 🚀");
-});
 
-app.listen(PORT, () => {
-  console.log("Servidor rodando na porta", PORT);
-});
+app.get("/",(req,res)=>{
+
+res.send("Backend VIP funcionando 🚀")
+
+})
+
+app.listen(PORT,()=>{
+
+console.log("Servidor rodando na porta",PORT)
+
+})
