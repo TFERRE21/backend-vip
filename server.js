@@ -360,6 +360,12 @@ unit_price:29.9
 
 payer:{email},
 
+back_urls:{
+success:"https://backend-vip.onrender.com",
+failure:"https://backend-vip.onrender.com",
+pending:"https://backend-vip.onrender.com"
+},
+
 notification_url:"https://backend-vip.onrender.com/webhook",
 
 auto_return:"approved"
