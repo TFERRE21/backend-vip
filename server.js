@@ -413,7 +413,6 @@ ADMIN DASHBOARD
 app.get("/admin/dashboard",async(req,res)=>{
 
 const totalUsers=await User.countDocuments()
-
 const vipUsers=await User.countDocuments({vip:true})
 
 const now=Date.now()
@@ -439,112 +438,17 @@ signalsToday:todaySignals.length
 })
 
 /* =============================
-PIX
-============================= */
-
-app.post("/create-payment",async(req,res)=>{
-
-try{
-
-const {email}=req.body
-
-const result=await payment.create({
-
-body:{
-transaction_amount:29.9,
-description:"VIP 30 dias",
-payment_method_id:"pix",
-payer:{email}
-}
-
-})
-
-res.json({
-
-id:result.id,
-
-qrCodeBase64:
-result.point_of_interaction?.transaction_data?.qr_code_base64,
-
-pixCode:
-result.point_of_interaction?.transaction_data?.qr_code
-
-})
-
-}catch(error){
-
-console.log(error)
-res.status(500).json({error:"Erro pagamento PIX"})
-
-}
-
-})
-
-/* =============================
-CHECK PIX
-============================= */
-
-app.get("/check-payment/:id/:email",async(req,res)=>{
-
-try{
-
-const {id,email}=req.params
-
-const result=await payment.get({id})
-
-if(result.status==="approved"){
-
-activateVip(email)
-
-}
-
-res.json({status:result.status})
-
-}catch(error){
-
-console.log(error)
-res.status(500).json({error:"Erro verificar pagamento"})
-
-}
-
-})
-
-/* =============================
-ATIVAR VIP
-============================= */
-
-async function activateVip(email){
-
-email=email.toLowerCase().trim()
-
-const user=await User.findOne({email})
-
-if(!user) return
-
-user.vip=true
-
-const expiration=new Date()
-
-expiration.setDate(expiration.getDate()+30)
-
-user.vipExpires=expiration
-
-await user.save()
-
-}
-
-/* =============================
 ROOT
 ============================= */
 
 app.get("/",(req,res)=>{
-
-res.send("Backend VIP funcionando 🚀")
-
+res.send("Backend CryptoSignals rodando 🚀")
 })
 
+/* =============================
+SERVER
+============================= */
+
 app.listen(PORT,()=>{
-
 console.log("Servidor rodando na porta",PORT)
-
 })
