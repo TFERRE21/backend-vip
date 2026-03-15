@@ -1,13 +1,14 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
-const mongoose = require("mongoose");
-const { MercadoPagoConfig, Payment, Preference } = require("mercadopago");
+require("dotenv").config()
 
-const app = express();
+const express = require("express")
+const cors = require("cors")
+const bcrypt = require("bcryptjs")
+const jwt = require("jsonwebtoken")
+const nodemailer = require("nodemailer")
+const mongoose = require("mongoose")
+const { MercadoPagoConfig, Payment, Preference } = require("mercadopago")
+
+const app = express()
 
 /* =============================
 MONGODB
@@ -49,6 +50,18 @@ app.use(express.json())
 
 const PORT = process.env.PORT || 10000
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret123"
+
+/* =============================
+USUÁRIOS ONLINE
+============================= */
+
+let onlineUsers = {}
+
+/* =============================
+HISTÓRICO DE SINAIS
+============================= */
+
+let signalsToday = []
 
 /* =============================
 MERCADO PAGO
@@ -112,9 +125,6 @@ app.post("/login",async(req,res)=>{
 try{
 
 let {email,password}=req.body
-
-if(!email || !password)
-return res.status(400).json({error:"Preencha email e senha"})
 
 email=email.toLowerCase().trim()
 
@@ -233,7 +243,203 @@ res.status(500).json({error:"Erro ao alterar senha"})
 })
 
 /* =============================
-PIX 30 DIAS
+USUÁRIO ONLINE
+============================= */
+
+app.post("/online",(req,res)=>{
+
+const {email}=req.body
+
+if(!email) return res.json({ok:false})
+
+onlineUsers[email]=Date.now()
+
+res.json({ok:true})
+
+})
+
+/* =============================
+USUÁRIOS ONLINE AGORA
+============================= */
+
+app.get("/online-users",(req,res)=>{
+
+const now=Date.now()
+
+const active=Object.values(onlineUsers)
+.filter(t=>now-t<120000)
+
+res.json({
+
+online:active.length
+
+})
+
+})
+
+/* =============================
+REGISTRAR SINAL
+============================= */
+
+app.post("/signal",(req,res)=>{
+
+const {coin,signal,result,profit}=req.body
+
+signalsToday.push({
+
+coin,
+signal,
+result,
+profit,
+time:new Date()
+
+})
+
+res.json({ok:true})
+
+})
+
+/* =============================
+RESUMO DO DIA
+============================= */
+
+app.get("/daily-summary",(req,res)=>{
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+const wins=todaySignals.filter(s=>s.result==="WIN").length
+
+const loss=todaySignals.filter(s=>s.result==="LOSS").length
+
+const accuracy=todaySignals.length
+?((wins/todaySignals.length)*100).toFixed(1)
+:0
+
+res.json({
+
+total:todaySignals.length,
+wins,
+loss,
+accuracy
+
+})
+
+})
+
+/* =============================
+TOP TRADES
+============================= */
+
+app.get("/top-trades",(req,res)=>{
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+const sorted=todaySignals
+.filter(s=>s.result==="WIN")
+.sort((a,b)=>b.profit-a.profit)
+.slice(0,10)
+
+res.json(sorted)
+
+})
+
+/* =============================
+RANKING MOEDAS
+============================= */
+
+app.get("/top-coins",(req,res)=>{
+
+let ranking={}
+
+signalsToday.forEach(s=>{
+
+if(!ranking[s.coin])
+ranking[s.coin]=0
+
+ranking[s.coin]+=s.profit || 0
+
+})
+
+const result=Object.keys(ranking)
+.map(coin=>({
+
+coin,
+profit:ranking[coin]
+
+}))
+.sort((a,b)=>b.profit-a.profit)
+.slice(0,10)
+
+res.json(result)
+
+})
+
+/* =============================
+TOTAL USERS
+============================= */
+
+app.get("/total-users",async(req,res)=>{
+
+const total=await User.countDocuments()
+
+res.json({total})
+
+})
+
+/* =============================
+ADMIN VIP USERS
+============================= */
+
+app.get("/admin/vip-users",async(req,res)=>{
+
+const users=await User.find({vip:true})
+
+res.json(users)
+
+})
+
+/* =============================
+ADMIN DASHBOARD
+============================= */
+
+app.get("/admin/dashboard",async(req,res)=>{
+
+const totalUsers=await User.countDocuments()
+
+const vipUsers=await User.countDocuments({vip:true})
+
+const now=Date.now()
+
+const activeUsers=Object.values(onlineUsers)
+.filter(t=>now-t<120000)
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+res.json({
+
+totalUsers,
+vipUsers,
+online:activeUsers.length,
+signalsToday:todaySignals.length
+
+})
+
+})
+
+/* =============================
+PIX
 ============================= */
 
 app.post("/create-payment",async(req,res)=>{
@@ -241,9 +447,6 @@ app.post("/create-payment",async(req,res)=>{
 try{
 
 const {email}=req.body
-
-if(!email)
-return res.status(400).json({error:"Email obrigatório"})
 
 const result=await payment.create({
 
@@ -303,128 +506,6 @@ console.log(error)
 res.status(500).json({error:"Erro verificar pagamento"})
 
 }
-
-})
-
-/* =============================
-CHECKOUT PRO CARTÃO
-============================= */
-
-app.post("/create-checkout",async(req,res)=>{
-
-try{
-
-const {email}=req.body
-
-const result=await preference.create({
-
-body:{
-
-items:[{
-
-title:"VIP 30 dias",
-quantity:1,
-currency_id:"BRL",
-unit_price:29.9
-
-}],
-
-payer:{email},
-
-back_urls:{
-
-success:"https://backend-vip.onrender.com/success",
-failure:"https://backend-vip.onrender.com/failure",
-pending:"https://backend-vip.onrender.com/pending"
-
-},
-
-auto_return:"approved",
-
-notification_url:
-"https://backend-vip.onrender.com/webhook"
-
-}
-
-})
-
-res.json({init_point:result.init_point})
-
-}catch(error){
-
-console.log(error)
-res.status(500).json({error:"Erro ao criar checkout"})
-
-}
-
-})
-
-/* =============================
-WEBHOOK
-============================= */
-
-app.post("/webhook",async(req,res)=>{
-
-try{
-
-const {type,data}=req.body
-
-if(type==="payment"){
-
-const paymentInfo=await payment.get({id:data.id})
-
-if(paymentInfo.status==="approved"){
-
-const email=paymentInfo.payer.email
-
-activateVip(email)
-
-}
-
-}
-
-res.sendStatus(200)
-
-}catch(error){
-
-console.log(error)
-res.sendStatus(500)
-
-}
-
-})
-
-/* =============================
-CHECK VIP
-============================= */
-
-app.get("/check-vip/:email",async(req,res)=>{
-
-const email=req.params.email.toLowerCase().trim()
-
-const user=await User.findOne({email})
-
-if(!user)
-return res.json({vip:false})
-
-if(user.vip && user.vipExpires){
-
-if(new Date()>user.vipExpires){
-
-user.vip=false
-user.vipExpires=null
-await user.save()
-
-}
-
-}
-
-res.json({
-
-vip:user.vip,
-expires:user.vipExpires
-
-})
 
 })
 
