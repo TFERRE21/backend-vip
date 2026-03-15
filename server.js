@@ -75,6 +75,27 @@ const payment = new Payment(client)
 const preference = new Preference(client)
 
 /* =============================
+ATIVAR VIP
+============================= */
+
+async function activateVip(email){
+
+const user = await User.findOne({email})
+
+if(!user) return
+
+const expiration = new Date()
+
+expiration.setDate(expiration.getDate() + 30)
+
+user.vip = true
+user.vipExpires = expiration
+
+await user.save()
+
+}
+
+/* =============================
 REGISTER
 ============================= */
 
@@ -243,195 +264,76 @@ res.status(500).json({error:"Erro ao alterar senha"})
 })
 
 /* =============================
-USUÁRIO ONLINE
+CRIAR CHECKOUT CARTÃO
 ============================= */
 
-app.post("/online",(req,res)=>{
+app.post("/create-checkout", async (req,res)=>{
 
-const {email}=req.body
+try{
 
-if(!email) return res.json({ok:false})
+const {email} = req.body
 
-onlineUsers[email]=Date.now()
+if(!email)
+return res.status(400).json({error:"Email obrigatório"})
 
-res.json({ok:true})
+const result = await preference.create({
+
+body:{
+
+items:[
+{
+title:"VIP CryptoSignals 30 dias",
+quantity:1,
+currency_id:"BRL",
+unit_price:29.9
+}
+],
+
+payer:{
+email
+},
+
+auto_return:"approved"
+
+}
 
 })
-
-/* =============================
-USUÁRIOS ONLINE AGORA
-============================= */
-
-app.get("/online-users",(req,res)=>{
-
-const now=Date.now()
-
-const active=Object.values(onlineUsers)
-.filter(t=>now-t<120000)
 
 res.json({
 
-online:active.length
+init_point: result.init_point
 
 })
 
+}catch(error){
+
+console.log("Erro criar checkout:",error)
+
+res.status(500).json({
+error:"Erro criar checkout"
 })
 
-/* =============================
-REGISTRAR SINAL
-============================= */
-
-app.post("/signal",(req,res)=>{
-
-const {coin,signal,result,profit}=req.body
-
-signalsToday.push({
-
-coin,
-signal,
-result,
-profit,
-time:new Date()
-
-})
-
-res.json({ok:true})
+}
 
 })
 
 /* =============================
-RESUMO DO DIA
+VERIFICAR VIP
 ============================= */
 
-app.get("/daily-summary",(req,res)=>{
+app.get("/check-vip/:email",async(req,res)=>{
 
-const today=new Date().toDateString()
+const {email}=req.params
 
-const todaySignals=signalsToday.filter(s=>
-new Date(s.time).toDateString()===today
-)
+const user=await User.findOne({email})
 
-const wins=todaySignals.filter(s=>s.result==="WIN").length
-
-const loss=todaySignals.filter(s=>s.result==="LOSS").length
-
-const accuracy=todaySignals.length
-?((wins/todaySignals.length)*100).toFixed(1)
-:0
+if(!user)
+return res.json({vip:false})
 
 res.json({
 
-total:todaySignals.length,
-wins,
-loss,
-accuracy
-
-})
-
-})
-
-/* =============================
-TOP TRADES
-============================= */
-
-app.get("/top-trades",(req,res)=>{
-
-const today=new Date().toDateString()
-
-const todaySignals=signalsToday.filter(s=>
-new Date(s.time).toDateString()===today
-)
-
-const sorted=todaySignals
-.filter(s=>s.result==="WIN")
-.sort((a,b)=>b.profit-a.profit)
-.slice(0,10)
-
-res.json(sorted)
-
-})
-
-/* =============================
-RANKING MOEDAS
-============================= */
-
-app.get("/top-coins",(req,res)=>{
-
-let ranking={}
-
-signalsToday.forEach(s=>{
-
-if(!ranking[s.coin])
-ranking[s.coin]=0
-
-ranking[s.coin]+=s.profit || 0
-
-})
-
-const result=Object.keys(ranking)
-.map(coin=>({
-
-coin,
-profit:ranking[coin]
-
-}))
-.sort((a,b)=>b.profit-a.profit)
-.slice(0,10)
-
-res.json(result)
-
-})
-
-/* =============================
-TOTAL USERS
-============================= */
-
-app.get("/total-users",async(req,res)=>{
-
-const total=await User.countDocuments()
-
-res.json({total})
-
-})
-
-/* =============================
-ADMIN VIP USERS
-============================= */
-
-app.get("/admin/vip-users",async(req,res)=>{
-
-const users=await User.find({vip:true})
-
-res.json(users)
-
-})
-
-/* =============================
-ADMIN DASHBOARD
-============================= */
-
-app.get("/admin/dashboard",async(req,res)=>{
-
-const totalUsers=await User.countDocuments()
-const vipUsers=await User.countDocuments({vip:true})
-
-const now=Date.now()
-
-const activeUsers=Object.values(onlineUsers)
-.filter(t=>now-t<120000)
-
-const today=new Date().toDateString()
-
-const todaySignals=signalsToday.filter(s=>
-new Date(s.time).toDateString()===today
-)
-
-res.json({
-
-totalUsers,
-vipUsers,
-online:activeUsers.length,
-signalsToday:todaySignals.length
+vip:user.vip,
+vipExpires:user.vipExpires
 
 })
 
