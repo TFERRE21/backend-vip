@@ -30,8 +30,17 @@ const User = mongoose.model("User",{
 
 email:String,
 password:String,
+
 vip:Boolean,
-vipExpires:Date
+vipExpires:Date,
+
+refCode:String,
+refBy:String,
+
+commission:{
+type:Number,
+default:0
+}
 
 })
 
@@ -126,6 +135,26 @@ user.vipExpires = expiration
 
 await user.save()
 
+/* PAGAR COMISSÃO */
+
+if(user.refBy){
+
+const refUser = await User.findOne({refCode:user.refBy})
+
+if(refUser){
+
+const commission = 29.9 * 0.03
+
+refUser.commission += commission
+
+await refUser.save()
+
+console.log("Comissão paga:",commission)
+
+}
+
+}
+
 console.log("VIP ativado:",email)
 
 }
@@ -181,7 +210,7 @@ app.post("/register",async(req,res)=>{
 
 try{
 
-let {email,password}=req.body
+let {email,password,ref}=req.body
 
 if(!email || !password)
 return res.status(400).json({error:"Preencha tudo"})
@@ -195,12 +224,19 @@ return res.status(400).json({error:"Usuário já existe"})
 
 const hashed=await bcrypt.hash(password,8)
 
+const refCode=Math.random().toString(36).substring(2,8)
+
 await User.create({
 
 email,
 password:hashed,
+
 vip:false,
-vipExpires:null
+vipExpires:null,
+
+refCode,
+refBy:ref || null,
+commission:0
 
 })
 
@@ -943,7 +979,7 @@ ${novaSenha}
 
 <p>Entre no VIP agora e receba sinais exclusivos.</p>
 
-<a href="https://t.me/seuVIP"
+<a href="https://backend-vip.onrender.com/vip"
 style="
 display:inline-block;
 margin-top:10px;
@@ -970,6 +1006,61 @@ res.json({message:"Nova senha enviada por e-mail."})
 
 console.log(error)
 res.status(500).json({error:"Erro ao enviar e-mail"})
+
+}
+
+})
+
+/* =============================
+LINK VIP
+============================= */
+
+app.get("/vip",(req,res)=>{
+
+res.redirect("cryptosignals://vip")
+
+})
+
+/* =============================
+LINK DE INDICAÇÃO
+============================= */
+
+app.get("/ref/:code",(req,res)=>{
+
+const {code}=req.params
+
+res.redirect(`cryptosignals://register?ref=${code}`)
+
+})
+
+/* =============================
+COMISSÃO AFILIADO
+============================= */
+
+app.get("/affiliate/:email",async(req,res)=>{
+
+try{
+
+const {email}=req.params
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+res.json({
+
+refCode:user.refCode,
+
+link:`https://backend-vip.onrender.com/ref/${user.refCode}`,
+
+commission:user.commission
+
+})
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
 
 }
 
