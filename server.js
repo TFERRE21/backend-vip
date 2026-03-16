@@ -224,7 +224,11 @@ return res.status(400).json({error:"Usuário já existe"})
 
 const hashed=await bcrypt.hash(password,8)
 
+/* GERAR CÓDIGO AFILIADO */
+
 const refCode=Math.random().toString(36).substring(2,8)
+
+/* CRIAR USUÁRIO */
 
 await User.create({
 
@@ -240,7 +244,104 @@ commission:0
 
 })
 
-res.json({message:"Conta criada com sucesso"})
+/* ENVIAR EMAIL BOAS VINDAS */
+
+await transporter.sendMail({
+
+from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
+to:email,
+subject:"🚀 Bem-vindo ao CryptoSignals",
+
+html:`
+
+<div style="font-family:Arial;background:#0f172a;padding:30px;color:white;text-align:center">
+
+<h1 style="color:#22c55e">🚀 Bem-vindo ao CryptoSignals</h1>
+
+<p>
+Sua conta foi criada com sucesso.
+</p>
+
+<hr style="margin:25px 0;border:1px solid #374151">
+
+<h2>🎁 Seu código de afiliado</h2>
+
+<div style="
+font-size:26px;
+font-weight:bold;
+background:#111827;
+padding:15px;
+border-radius:8px;
+display:inline-block;
+margin:10px 0;
+letter-spacing:2px;
+">
+${refCode}
+</div>
+
+<p>
+Compartilhe seu link e ganhe <b>3% de comissão</b> em cada assinatura VIP.
+</p>
+
+<p>Seu link de indicação:</p>
+
+<div style="
+background:#111827;
+padding:10px;
+border-radius:6px;
+word-break:break-all;
+">
+
+https://backend-vip.onrender.com/ref/${refCode}
+
+</div>
+
+<hr style="margin:30px 0;border:1px solid #374151">
+
+<h2 style="color:#f59e0b">⭐ Torne-se VIP</h2>
+
+<p>
+
+✔ sinais premium  
+✔ scanner automático da Binance  
+✔ alertas de trade em tempo real  
+✔ estatísticas profissionais  
+
+</p>
+
+<a href="https://backend-vip.onrender.com/vip"
+style="
+display:inline-block;
+margin-top:10px;
+padding:14px 24px;
+background:#f59e0b;
+color:black;
+text-decoration:none;
+font-weight:bold;
+border-radius:8px;
+font-size:16px;
+">
+
+TORNAR-SE VIP
+
+</a>
+
+<p style="margin-top:30px;color:#9ca3af;font-size:12px">
+CryptoSignals ©
+</p>
+
+</div>
+
+`
+
+})
+
+res.json({
+
+message:"Conta criada com sucesso",
+refCode
+
+})
 
 }catch(error){
 
