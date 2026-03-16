@@ -891,39 +891,49 @@ app.post("/recover-password", async (req,res)=>{
 
 try{
 
-if(!req.body){
-return res.status(400).json({error:"Body vazio"})
+// garantir que body existe
+if(!req.body || typeof req.body !== "object"){
+return res.status(400).json({error:"Body inválido"})
 }
 
+// pegar email
 const email = req.body.email
 
-if(!email){
+if(!email || email.trim() === ""){
 return res.status(400).json({error:"Email não enviado"})
 }
 
-const user = await User.findOne({email})
+// buscar usuário
+const user = await User.findOne({email: email.toLowerCase().trim()})
 
 if(!user){
 return res.status(404).json({error:"Usuário não encontrado"})
 }
 
+// gerar nova senha
 const newPassword = Math.random().toString(36).slice(-8)
 
+// criptografar
 const hashedPassword = await bcrypt.hash(newPassword,8)
 
 user.password = hashedPassword
 await user.save()
 
+// enviar email
 await transporter.sendMail({
 
-from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
-to: email,
+from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
+to:email,
 subject:"Recuperação de senha",
-text:`Sua nova senha é: ${newPassword}`
+text:`Sua nova senha é: ${newPassword}
+
+Entre no app e altere depois.`
 
 })
 
-res.json({
+console.log("EMAIL ENVIADO PARA:",email)
+
+return res.json({
 success:true,
 message:"Nova senha enviada por email"
 })
@@ -932,7 +942,7 @@ message:"Nova senha enviada por email"
 
 console.log("ERRO AO ENVIAR EMAIL:",err)
 
-res.status(500).json({
+return res.status(500).json({
 error:"Erro ao enviar email"
 })
 
