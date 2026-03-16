@@ -65,6 +65,12 @@ HISTÓRICO DE SINAIS
 let signalsToday = []
 
 /* =============================
+TOKENS PUSH (NOVO)
+============================= */
+
+let pushTokens = []
+
+/* =============================
 MERCADO PAGO
 ============================= */
 
@@ -96,6 +102,49 @@ user.vipExpires = expiration
 await user.save()
 
 console.log("VIP ativado:",email)
+
+}
+
+/* =============================
+SALVAR PUSH TOKEN (NOVO)
+============================= */
+
+app.post("/push-token",(req,res)=>{
+
+const {token} = req.body
+
+if(!pushTokens.includes(token)){
+pushTokens.push(token)
+}
+
+res.json({ok:true})
+
+})
+
+/* =============================
+ENVIAR PUSH (NOVO)
+============================= */
+
+async function sendPush(message){
+
+for(const token of pushTokens){
+
+try{
+
+await axios.post(
+"https://exp.host/--/api/v2/push/send",
+{
+to:token,
+title:"🚀 Novo sinal detectado",
+body:message
+}
+)
+
+}catch(e){
+console.log("Erro push",e.message)
+}
+
+}
 
 }
 
@@ -260,7 +309,7 @@ accuracy
 })
 
 /* =============================
-STATS PARA O APP (ADICIONADO)
+STATS PARA O APP
 ============================= */
 
 app.get("/stats",(req,res)=>{
@@ -508,7 +557,25 @@ res.sendStatus(500)
 })
 
 /* =============================
-SCANNER BINANCE
+IA PROBABILIDADE (NOVO)
+============================= */
+
+function probability(closes){
+
+const last = closes[closes.length-1]
+const prev = closes[closes.length-2]
+
+let score = 50
+
+if(last>prev) score+=10
+else score-=10
+
+return Math.min(Math.max(score,5),95)
+
+}
+
+/* =============================
+RSI
 ============================= */
 
 async function calculateRSI(closes,period=14){
@@ -534,6 +601,10 @@ const rs=avgGain/avgLoss
 return 100-(100/(1+rs))
 
 }
+
+/* =============================
+SCANNER BINANCE
+============================= */
 
 async function scanBinance(){
 
@@ -574,9 +645,12 @@ coin:s.symbol,
 signal,
 result:"WIN",
 profit:parseFloat(profit),
+probability:probability(closes),
 time:new Date()
 
 })
+
+await sendPush(`${s.symbol} sinal ${signal}`)
 
 console.log("SINAL:",s.symbol,signal)
 
