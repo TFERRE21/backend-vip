@@ -267,6 +267,146 @@ res.status(500).json({error:"Erro ao alterar senha"})
 })
 
 /* =============================
+USUÁRIO ONLINE
+============================= */
+
+app.post("/online",(req,res)=>{
+
+const {email}=req.body
+
+if(!email) return res.json({ok:false})
+
+onlineUsers[email]=Date.now()
+
+res.json({ok:true})
+
+})
+
+/* =============================
+USUÁRIOS ONLINE AGORA
+============================= */
+
+app.get("/online-users",(req,res)=>{
+
+const now=Date.now()
+
+const active=Object.values(onlineUsers)
+.filter(t=>now-t<120000)
+
+res.json({
+
+online:active.length
+
+})
+
+})
+
+/* =============================
+REGISTRAR SINAL
+============================= */
+
+app.post("/signal",(req,res)=>{
+
+const {coin,signal,result,profit}=req.body
+
+signalsToday.push({
+
+coin,
+signal,
+result,
+profit,
+time:new Date()
+
+})
+
+res.json({ok:true})
+
+})
+
+/* =============================
+RESUMO DO DIA
+============================= */
+
+app.get("/daily-summary",(req,res)=>{
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+const wins=todaySignals.filter(s=>s.result==="WIN").length
+
+const loss=todaySignals.filter(s=>s.result==="LOSS").length
+
+const accuracy=todaySignals.length
+?((wins/todaySignals.length)*100).toFixed(1)
+:0
+
+res.json({
+
+total:todaySignals.length,
+wins,
+loss,
+accuracy
+
+})
+
+})
+
+/* =============================
+TOP TRADES
+============================= */
+
+app.get("/top-trades",(req,res)=>{
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+const sorted=todaySignals
+.filter(s=>s.result==="WIN")
+.sort((a,b)=>b.profit-a.profit)
+.slice(0,10)
+
+res.json(sorted)
+
+})
+
+/* =============================
+RANKING MOEDAS
+============================= */
+
+app.get("/top-coins",(req,res)=>{
+
+let ranking={}
+
+signalsToday.forEach(s=>{
+
+if(!ranking[s.coin])
+ranking[s.coin]=0
+
+ranking[s.coin]+=s.profit || 0
+
+})
+
+const result=Object.keys(ranking)
+.map(coin=>({
+
+coin,
+profit:ranking[coin]
+
+}))
+.sort((a,b)=>b.profit-a.profit)
+.slice(0,10)
+
+res.json(result)
+
+})
+
+/* =============================
 CRIAR PIX
 ============================= */
 
