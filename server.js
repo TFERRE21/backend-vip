@@ -917,7 +917,55 @@ await transporter.sendMail({
 from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
 to:email,
 subject:"Recuperação de senha",
-html:`
+html: `
+
+<div style="font-family:Arial;background:#0f172a;padding:30px;color:white;text-align:center">
+
+<h2 style="color:#22c55e">🔐 Crypto Signals</h2>
+
+<p style="font-size:18px">Sua nova senha:</p>
+
+<div style="
+font-size:28px;
+font-weight:bold;
+background:#111827;
+padding:15px;
+border-radius:8px;
+display:inline-block;
+margin:10px 0;
+letter-spacing:2px;
+">
+${novaSenha}
+</div>
+
+<p style="margin-top:15px;color:#d1d5db">
+⚠ recomendamos alterar após login
+</p>
+
+<hr style="margin:30px 0;border:1px solid #374151">
+
+<h3 style="color:#f59e0b">🚀 QUER SINAIS PREMIUM?</h3>
+
+<p>Entre no VIP agora e receba sinais exclusivos.</p>
+
+<a href="https://SEULINKVIP.com"
+style="
+display:inline-block;
+margin-top:10px;
+padding:14px 24px;
+background:#f59e0b;
+color:black;
+text-decoration:none;
+font-weight:bold;
+border-radius:8px;
+font-size:16px;
+">
+ENTRAR NO VIP
+</a>
+
+</div>
+
+``
 <h2>Recuperação de senha</h2>
 
 <p>Sua nova senha é:</p>
