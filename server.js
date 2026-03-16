@@ -36,6 +36,81 @@ vipExpires:Date
 })
 
 /* =============================
+EMAIL SMTP (ADICIONADO)
+============================= */
+
+const transporter = nodemailer.createTransport({
+
+service:"gmail",
+
+auth:{
+user:process.env.EMAIL_USER,
+pass:process.env.EMAIL_PASS
+}
+
+})
+
+transporter.verify((error)=>{
+
+if(error){
+console.log("Erro SMTP:",error)
+}else{
+console.log("Servidor de email pronto")
+}
+
+})
+
+/* =============================
+RECUPERAÇÃO DE SENHA (ADICIONADO)
+============================= */
+
+app.post("/recover-password",async(req,res)=>{
+
+try{
+
+const {email}=req.body
+
+console.log("Tentativa recuperação:",email)
+
+const user = await User.findOne({email})
+
+if(!user){
+return res.status(404).json({error:"Usuário não encontrado"})
+}
+
+const newPassword = Math.random().toString(36).slice(-8)
+
+const hash = await bcrypt.hash(newPassword,8)
+
+user.password = hash
+
+await user.save()
+
+await transporter.sendMail({
+
+from:process.env.EMAIL_USER,
+to:email,
+subject:"Recuperação de senha CryptoSignals",
+text:`Sua nova senha é: ${newPassword}`
+
+})
+
+console.log("Email enviado com sucesso")
+
+res.json({message:"Nova senha enviada para seu email"})
+
+}catch(error){
+
+console.log("ERRO AO ENVIAR EMAIL:")
+console.log(error)
+
+res.status(500).json({error:"Erro ao enviar email"})
+
+}
+
+})
+
+/* =============================
 REMOVE BARRA FINAL
 ============================= */
 
