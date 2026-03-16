@@ -455,7 +455,7 @@ res.json({ok:true})
 RESUMO DO DIA (VIP)
 ============================= */
 
-app.post("/daily-summary",limitFree,(req,res)=>{
+app.post("/daily-summary",(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -483,7 +483,7 @@ accuracy
 STATS PARA O APP (VIP)
 ============================= */
 
-app.post("/stats",requireVip,(req,res)=>{
+app.post("/stats",(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -519,7 +519,7 @@ precisao:accuracy
 TOP TRADES (VIP)
 ============================= */
 
-app.post("/top-trades",limitFree,(req,res)=>{
+app.post("/top-trades",(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -540,7 +540,7 @@ res.json(sorted)
 RANKING MOEDAS (VIP)
 ============================= */
 
-app.post("/top-coins",limitFree,(req,res)=>{
+app.post("/top-coins",(req,res)=>{
 
 let ranking={}
 
@@ -918,7 +918,7 @@ return "1.0"
 TOP 5 SINAIS DO MOMENTO (VIP)
 ============================= */
 
-app.post("/top5",limitFree,(req,res)=>{
+app.post("/top5",(req,res)=>{
 
 try{
 
