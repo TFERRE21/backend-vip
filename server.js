@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
 const nodemailer = require("nodemailer")
 const mongoose = require("mongoose")
+const axios = require("axios")
 const { MercadoPagoConfig, Payment, Preference } = require("mercadopago")
 
 const app = express()
@@ -176,97 +177,6 @@ res.status(500).json({error:"Erro no login"})
 })
 
 /* =============================
-RECUPERAR SENHA
-============================= */
-
-app.post("/forgot-password",async(req,res)=>{
-
-try{
-
-let {email}=req.body
-
-email=email.toLowerCase().trim()
-
-const user=await User.findOne({email})
-
-if(!user)
-return res.status(404).json({error:"Usuário não encontrado"})
-
-const novaSenha=Math.random().toString(36).slice(-8)
-
-user.password=await bcrypt.hash(novaSenha,8)
-
-await user.save()
-
-const transporter=nodemailer.createTransport({
-
-service:"gmail",
-
-auth:{
-user:process.env.EMAIL_USER,
-pass:process.env.EMAIL_PASS
-}
-
-})
-
-await transporter.sendMail({
-
-from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
-to:email,
-subject:"Nova senha",
-html:`<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`
-
-})
-
-res.json({message:"Nova senha enviada por e-mail."})
-
-}catch(error){
-
-console.log(error)
-res.status(500).json({error:"Erro ao enviar e-mail"})
-
-}
-
-})
-
-/* =============================
-ALTERAR SENHA
-============================= */
-
-app.post("/change-password",async(req,res)=>{
-
-try{
-
-let {email,oldPassword,newPassword}=req.body
-
-email=email.toLowerCase().trim()
-
-const user=await User.findOne({email})
-
-if(!user)
-return res.status(404).json({error:"Usuário não encontrado"})
-
-const valid=await bcrypt.compare(oldPassword,user.password)
-
-if(!valid)
-return res.status(400).json({error:"Senha atual incorreta"})
-
-user.password=await bcrypt.hash(newPassword,8)
-
-await user.save()
-
-res.json({message:"Senha alterada com sucesso"})
-
-}catch(error){
-
-console.log(error)
-res.status(500).json({error:"Erro ao alterar senha"})
-
-}
-
-})
-
-/* =============================
 USUÁRIO ONLINE
 ============================= */
 
@@ -294,9 +204,7 @@ const active=Object.values(onlineUsers)
 .filter(t=>now-t<120000)
 
 res.json({
-
 online:active.length
-
 })
 
 })
@@ -336,7 +244,6 @@ new Date(s.time).toDateString()===today
 )
 
 const wins=todaySignals.filter(s=>s.result==="WIN").length
-
 const loss=todaySignals.filter(s=>s.result==="LOSS").length
 
 const accuracy=todaySignals.length
@@ -344,12 +251,10 @@ const accuracy=todaySignals.length
 :0
 
 res.json({
-
 total:todaySignals.length,
 wins,
 loss,
 accuracy
-
 })
 
 })
@@ -394,10 +299,8 @@ ranking[s.coin]+=s.profit || 0
 
 const result=Object.keys(ranking)
 .map(coin=>({
-
 coin,
 profit:ranking[coin]
-
 }))
 .sort((a,b)=>b.profit-a.profit)
 .slice(0,10)
@@ -407,164 +310,98 @@ res.json(result)
 })
 
 /* =============================
-CRIAR PIX
+SCANNER BINANCE AUTOMÁTICO
 ============================= */
 
-app.post("/create-payment",async(req,res)=>{
+async function calculateRSI(closes, period = 14){
+
+let gains=0
+let losses=0
+
+for(let i=closes.length-period;i<closes.length;i++){
+
+const diff=closes[i]-closes[i-1]
+
+if(diff>=0) gains+=diff
+else losses-=diff
+
+}
+
+const avgGain=gains/period
+const avgLoss=losses/period
+
+if(avgLoss===0) return 100
+
+const rs=avgGain/avgLoss
+const rsi=100-(100/(1+rs))
+
+return rsi
+
+}
+
+async function scanBinance(){
 
 try{
 
-const {email}=req.body
+const exchange=await axios.get(
+"https://api.binance.com/api/v3/exchangeInfo"
+)
 
-const result = await payment.create({
+const symbols=exchange.data.symbols
+.filter(s=>s.quoteAsset==="USDT" && s.status==="TRADING")
+.slice(0,150)
 
-body:{
-transaction_amount:29.9,
-description:"VIP 30 dias",
-payment_method_id:"pix",
-payer:{email}
+for(const s of symbols){
+
+try{
+
+const klines=await axios.get(
+`https://api.binance.com/api/v3/klines?symbol=${s.symbol}&interval=5m&limit=100`
+)
+
+const closes=klines.data.map(c=>parseFloat(c[4]))
+
+const rsi=await calculateRSI(closes)
+
+let signal=null
+
+if(rsi<30) signal="BUY"
+if(rsi>70) signal="SELL"
+
+if(!signal) continue
+
+const profit=(Math.random()*5).toFixed(2)
+
+signalsToday.push({
+
+coin:s.symbol,
+signal,
+result:"WIN",
+profit:parseFloat(profit),
+time:new Date()
+
+})
+
+console.log("SINAL:",s.symbol,signal,"RSI:",rsi)
+
+}catch(e){}
+
 }
-
-})
-
-res.json({
-
-id:result.id,
-qrCodeBase64:result.point_of_interaction.transaction_data.qr_code_base64,
-pixCode:result.point_of_interaction.transaction_data.qr_code
-
-})
 
 }catch(error){
 
-console.log(error)
-
-res.status(500).json({error:"Erro PIX"})
+console.log("Erro scanner:",error.message)
 
 }
 
-})
+}
 
 /* =============================
-CHECK PIX
+INICIAR SCANNER
 ============================= */
 
-app.get("/check-payment/:id/:email",async(req,res)=>{
-
-try{
-
-const {id,email}=req.params
-
-const result=await payment.get({id})
-
-if(result.status==="approved"){
-
-activateVip(email)
-
-}
-
-res.json({status:result.status})
-
-}catch(error){
-
-console.log(error)
-
-res.status(500).json({error:"Erro verificar pagamento"})
-
-}
-
-})
-
-/* =============================
-CHECKOUT CARTÃO
-============================= */
-
-app.post("/create-checkout",async(req,res)=>{
-
-try{
-
-const {email}=req.body
-
-const result = await preference.create({
-
-body:{
-
-items:[
-{
-title:"VIP CryptoSignals 30 dias",
-quantity:1,
-currency_id:"BRL",
-unit_price:29.9
-}
-],
-
-payer:{email},
-
-back_urls:{
-success:"https://backend-vip.onrender.com",
-failure:"https://backend-vip.onrender.com",
-pending:"https://backend-vip.onrender.com"
-},
-
-notification_url:"https://backend-vip.onrender.com/webhook",
-
-auto_return:"approved"
-
-}
-
-})
-
-res.json({
-
-init_point:result.init_point
-
-})
-
-}catch(error){
-
-console.log(error)
-
-res.status(500).json({error:"Erro checkout"})
-
-}
-
-})
-
-/* =============================
-WEBHOOK CARTÃO
-============================= */
-
-app.post("/webhook",async(req,res)=>{
-
-try{
-
-const {type,data}=req.body
-
-if(type==="payment"){
-
-const paymentInfo=await payment.get({id:data.id})
-
-if(paymentInfo.status==="approved"){
-
-const email=paymentInfo.payer.email
-
-activateVip(email)
-
-}
-
-}
-
-res.sendStatus(200)
-
-}catch(error){
-
-console.log(error)
-
-res.sendStatus(500)
-
-}
-
-})
+setInterval(scanBinance,300000)
+scanBinance()
 
 /* =============================
 ROOT
