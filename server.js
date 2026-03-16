@@ -941,10 +941,11 @@ app.post("/recover-password", async (req,res)=>{
 
 try{
 
-const {email}=req.body
+const {email}=req.body?.email
 
 if(!email)
-return res.status(400).json({error:"Email obrigatório"})
+return res.status(400).json({error:"Email não enviado"})
+}
 
 const user = await User.findOne({email})
 
