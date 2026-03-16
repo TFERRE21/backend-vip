@@ -891,33 +891,28 @@ app.post("/forgot-password",async(req,res)=>{
 
 try{
 
-if(!req.body || !req.body.email){
-return res.status(400).json({error:"Email obrigatório"})
-}
+let {email}=req.body
 
-let email=req.body.email.toLowerCase().trim()
+email=email.toLowerCase().trim()
 
 const user=await User.findOne({email})
 
-if(!user){
+if(!user)
 return res.status(404).json({error:"Usuário não encontrado"})
-}
 
-// gerar nova senha
 const novaSenha=Math.random().toString(36).slice(-8)
 
-// criptografar senha
 user.password=await bcrypt.hash(novaSenha,8)
 
 await user.save()
 
-// enviar email
 await transporter.sendMail({
 
 from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
 to:email,
-subject:"Recuperação de senha",
-html: `
+subject:"🔐 Recuperação de senha - CryptoSignals",
+
+html:`
 
 <div style="font-family:Arial;background:#0f172a;padding:30px;color:white;text-align:center">
 
@@ -948,7 +943,7 @@ ${novaSenha}
 
 <p>Entre no VIP agora e receba sinais exclusivos.</p>
 
-<a href="https://SEULINKVIP.com"
+<a href="https://t.me/seuVIP"
 style="
 display:inline-block;
 margin-top:10px;
@@ -965,26 +960,15 @@ ENTRAR NO VIP
 
 </div>
 
-``
-<h2>Recuperação de senha</h2>
-
-<p>Sua nova senha é:</p>
-
-<h1>${novaSenha}</h1>
-
-<p>Recomendamos alterar a senha após entrar no aplicativo.</p>
 `
 
 })
-
-console.log("Nova senha enviada para:",email)
 
 res.json({message:"Nova senha enviada por e-mail."})
 
 }catch(error){
 
-console.log("Erro recuperação senha:",error)
-
+console.log(error)
 res.status(500).json({error:"Erro ao enviar e-mail"})
 
 }
