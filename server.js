@@ -102,6 +102,12 @@ HISTÓRICO DE SINAIS
 let signalsToday = []
 
 /* =============================
+CONTROLE FREE (5 SINAIS POR DIA)
+============================= */
+
+let freeAccess = {}
+
+/* =============================
 TOKENS PUSH (NOVO)
 ============================= */
 
@@ -449,7 +455,7 @@ res.json({ok:true})
 RESUMO DO DIA (VIP)
 ============================= */
 
-app.post("/daily-summary",requireVip,(req,res)=>{
+app.post("/daily-summary",limitFree,(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -513,7 +519,7 @@ precisao:accuracy
 TOP TRADES (VIP)
 ============================= */
 
-app.post("/top-trades",requireVip,(req,res)=>{
+app.post("/top-trades",limitFree,(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -534,7 +540,7 @@ res.json(sorted)
 RANKING MOEDAS (VIP)
 ============================= */
 
-app.post("/top-coins",requireVip,(req,res)=>{
+app.post("/top-coins",limitFree,(req,res)=>{
 
 let ranking={}
 
@@ -912,7 +918,7 @@ return "1.0"
 TOP 5 SINAIS DO MOMENTO (VIP)
 ============================= */
 
-app.post("/top5",requireVip,(req,res)=>{
+app.post("/top5",limitFree,(req,res)=>{
 
 try{
 
@@ -1336,23 +1342,32 @@ async function requireVip(req,res,next){
 
 try{
 
-const {email} = req.body
+const email = req.body.email || req.query.email
 
 if(!email)
-return res.status(400).json({error:"Email obrigatório"})
+return res.status(400).json({
+error:"Email obrigatório"
+})
 
 const user = await User.findOne({email})
 
-if(!user || !user.vip)
+if(!user)
+return res.status(404).json({
+error:"Usuário não encontrado"
+})
+
+if(!user.vip)
 return res.status(403).json({
-error:"Acesso VIP necessário"
+error:"Conteúdo VIP bloqueado"
 })
 
 next()
 
 }catch(e){
 
-res.status(500).json({error:"Erro servidor"})
+res.status(500).json({
+error:"Erro servidor"
+})
 
 }
 
@@ -1399,6 +1414,65 @@ res.status(500).json({error:"Erro servidor"})
 }
 
 })
+
+/* =============================
+LIMITAR FREE
+============================= */
+
+async function limitFree(req,res,next){
+
+try{
+
+const {email}=req.body
+
+if(!email)
+return res.status(400).json({error:"Email obrigatório"})
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+/* VIP TEM ACESSO TOTAL */
+
+if(user.vip){
+return next()
+}
+
+const today=new Date().toDateString()
+
+if(!freeAccess[email]){
+freeAccess[email]={date:today,count:0}
+}
+
+/* RESET DIÁRIO */
+
+if(freeAccess[email].date !== today){
+freeAccess[email]={date:today,count:0}
+}
+
+if(freeAccess[email].count >= 5){
+
+return res.status(403).json({
+
+error:"Limite FREE atingido",
+message:"Assine VIP para acessar sinais ilimitados"
+
+})
+
+}
+
+freeAccess[email].count++
+
+next()
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
+
+}
+
+}
 
 /* =============================
 ROOT
