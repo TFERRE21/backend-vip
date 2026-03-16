@@ -65,7 +65,13 @@ HISTÓRICO DE SINAIS
 let signalsToday = []
 
 /* =============================
-TOKENS PUSH (NOVO)
+IA HISTÓRICO
+============================= */
+
+let aiHistory = []
+
+/* =============================
+TOKENS PUSH
 ============================= */
 
 let pushTokens = []
@@ -82,7 +88,7 @@ const payment = new Payment(client)
 const preference = new Preference(client)
 
 /* =============================
-FUNÇÃO ATIVAR VIP
+ATIVAR VIP
 ============================= */
 
 async function activateVip(email){
@@ -106,12 +112,12 @@ console.log("VIP ativado:",email)
 }
 
 /* =============================
-SALVAR PUSH TOKEN (NOVO)
+PUSH TOKEN
 ============================= */
 
 app.post("/push-token",(req,res)=>{
 
-const {token} = req.body
+const {token}=req.body
 
 if(!pushTokens.includes(token)){
 pushTokens.push(token)
@@ -120,10 +126,6 @@ pushTokens.push(token)
 res.json({ok:true})
 
 })
-
-/* =============================
-ENVIAR PUSH (NOVO)
-============================= */
 
 async function sendPush(message){
 
@@ -140,9 +142,7 @@ body:message
 }
 )
 
-}catch(e){
-console.log("Erro push",e.message)
-}
+}catch(e){}
 
 }
 
@@ -158,9 +158,6 @@ try{
 
 let {email,password}=req.body
 
-if(!email || !password)
-return res.status(400).json({error:"Preencha tudo"})
-
 email=email.toLowerCase().trim()
 
 const exists=await User.findOne({email})
@@ -174,17 +171,15 @@ await User.create({
 
 email,
 password:hashed,
-vip:false,
-vipExpires:null
+vip:false
 
 })
 
-res.json({message:"Conta criada com sucesso"})
+res.json({message:"Conta criada"})
 
 }catch(error){
 
-console.log(error)
-res.status(500).json({error:"Erro ao registrar"})
+res.status(500).json({error:"Erro register"})
 
 }
 
@@ -218,22 +213,19 @@ res.json({token})
 
 }catch(error){
 
-console.log(error)
-res.status(500).json({error:"Erro no login"})
+res.status(500).json({error:"Erro login"})
 
 }
 
 })
 
 /* =============================
-USUÁRIO ONLINE
+ONLINE
 ============================= */
 
 app.post("/online",(req,res)=>{
 
 const {email}=req.body
-
-if(!email) return res.json({ok:false})
 
 onlineUsers[email]=Date.now()
 
@@ -242,74 +234,7 @@ res.json({ok:true})
 })
 
 /* =============================
-USUÁRIOS ONLINE AGORA
-============================= */
-
-app.get("/online-users",(req,res)=>{
-
-const now=Date.now()
-
-const active=Object.values(onlineUsers)
-.filter(t=>now-t<120000)
-
-res.json({
-online:active.length
-})
-
-})
-
-/* =============================
-REGISTRAR SINAL
-============================= */
-
-app.post("/signal",(req,res)=>{
-
-const {coin,signal,result,profit}=req.body
-
-signalsToday.push({
-
-coin,
-signal,
-result,
-profit,
-time:new Date()
-
-})
-
-res.json({ok:true})
-
-})
-
-/* =============================
-RESUMO DO DIA
-============================= */
-
-app.get("/daily-summary",(req,res)=>{
-
-const today=new Date().toDateString()
-
-const todaySignals=signalsToday.filter(s=>
-new Date(s.time).toDateString()===today
-)
-
-const wins=todaySignals.filter(s=>s.result==="WIN").length
-const loss=todaySignals.filter(s=>s.result==="LOSS").length
-
-const accuracy=todaySignals.length
-?((wins/todaySignals.length)*100).toFixed(1)
-:0
-
-res.json({
-total:todaySignals.length,
-wins,
-loss,
-accuracy
-})
-
-})
-
-/* =============================
-STATS PARA O APP
+STATS
 ============================= */
 
 app.get("/stats",(req,res)=>{
@@ -327,14 +252,9 @@ const accuracy=todaySignals.length
 ?((wins/todaySignals.length)*100).toFixed(1)
 :0
 
-const now=Date.now()
-
-const active=Object.values(onlineUsers)
-.filter(t=>now-t<120000)
-
 res.json({
 
-online:active.length,
+online:Object.keys(onlineUsers).length,
 sinaisHoje:todaySignals.length,
 acertos:wins,
 erros:loss,
@@ -350,15 +270,8 @@ TOP TRADES
 
 app.get("/top-trades",(req,res)=>{
 
-const today=new Date().toDateString()
-
-const todaySignals=signalsToday.filter(s=>
-new Date(s.time).toDateString()===today
-)
-
-const sorted=todaySignals
-.filter(s=>s.result==="WIN")
-.sort((a,b)=>b.profit-a.profit)
+const sorted=[...signalsToday]
+.sort((a,b)=>b.probability-a.probability)
 .slice(0,10)
 
 res.json(sorted)
@@ -366,201 +279,10 @@ res.json(sorted)
 })
 
 /* =============================
-RANKING MOEDAS
+IA PROBABILIDADE
 ============================= */
 
-app.get("/top-coins",(req,res)=>{
-
-let ranking={}
-
-signalsToday.forEach(s=>{
-
-if(!ranking[s.coin])
-ranking[s.coin]=0
-
-ranking[s.coin]+=s.profit || 0
-
-})
-
-const result=Object.keys(ranking)
-.map(coin=>({
-
-coin,
-profit:ranking[coin]
-
-}))
-.sort((a,b)=>b.profit-a.profit)
-.slice(0,10)
-
-res.json(result)
-
-})
-
-/* =============================
-CRIAR PIX
-============================= */
-
-app.post("/create-payment",async(req,res)=>{
-
-try{
-
-const {email}=req.body
-
-const result = await payment.create({
-
-body:{
-transaction_amount:29.9,
-description:"VIP 30 dias",
-payment_method_id:"pix",
-payer:{email}
-}
-
-})
-
-res.json({
-
-id:result.id,
-qrCodeBase64:result.point_of_interaction.transaction_data.qr_code_base64,
-pixCode:result.point_of_interaction.transaction_data.qr_code
-
-})
-
-}catch(error){
-
-console.log(error)
-
-res.status(500).json({error:"Erro PIX"})
-
-}
-
-})
-
-/* =============================
-CHECK PIX
-============================= */
-
-app.get("/check-payment/:id/:email",async(req,res)=>{
-
-try{
-
-const {id,email}=req.params
-
-const result=await payment.get({id})
-
-if(result.status==="approved"){
-
-activateVip(email)
-
-}
-
-res.json({status:result.status})
-
-}catch(error){
-
-console.log(error)
-
-res.status(500).json({error:"Erro verificar pagamento"})
-
-}
-
-})
-
-/* =============================
-CHECKOUT CARTÃO
-============================= */
-
-app.post("/create-checkout",async(req,res)=>{
-
-try{
-
-const {email}=req.body
-
-const result = await preference.create({
-
-body:{
-
-items:[
-{
-title:"VIP CryptoSignals 30 dias",
-quantity:1,
-currency_id:"BRL",
-unit_price:29.9
-}
-],
-
-payer:{email},
-
-back_urls:{
-success:"https://backend-vip.onrender.com",
-failure:"https://backend-vip.onrender.com",
-pending:"https://backend-vip.onrender.com"
-},
-
-notification_url:"https://backend-vip.onrender.com/webhook",
-
-auto_return:"approved"
-
-}
-
-})
-
-res.json({
-
-init_point:result.init_point
-
-})
-
-}catch(error){
-
-console.log(error)
-
-res.status(500).json({error:"Erro checkout"})
-
-}
-
-})
-
-/* =============================
-WEBHOOK CARTÃO
-============================= */
-
-app.post("/webhook",async(req,res)=>{
-
-try{
-
-const {type,data}=req.body
-
-if(type==="payment"){
-
-const paymentInfo=await payment.get({id:data.id})
-
-if(paymentInfo.status==="approved"){
-
-const email=paymentInfo.payer.email
-
-activateVip(email)
-
-}
-
-}
-
-res.sendStatus(200)
-
-}catch(error){
-
-console.log(error)
-
-res.sendStatus(500)
-
-}
-
-})
-
-/* =============================
-IA PROBABILIDADE (NOVO)
-============================= */
-
-function probability(closes){
+function aiProbability(closes){
 
 const last = closes[closes.length-1]
 const prev = closes[closes.length-2]
@@ -570,35 +292,40 @@ let score = 50
 if(last>prev) score+=10
 else score-=10
 
+const historyWins =
+aiHistory.filter(s=>s.result==="WIN").length
+
+const historyLoss =
+aiHistory.filter(s=>s.result==="LOSS").length
+
+if(historyWins>historyLoss) score+=5
+else score-=5
+
 return Math.min(Math.max(score,5),95)
 
 }
 
 /* =============================
-RSI
+PUMP DETECTION
 ============================= */
 
-async function calculateRSI(closes,period=14){
+function detectPump(closes,volumes){
 
-let gains=0
-let losses=0
+const last = closes[closes.length-1]
+const prev = closes[closes.length-2]
 
-for(let i=closes.length-period;i<closes.length;i++){
+const change = ((last-prev)/prev)*100
 
-const diff=closes[i]-closes[i-1]
+const avgVolume =
+volumes.slice(-20).reduce((a,b)=>a+b)/20
 
-if(diff>=0) gains+=diff
-else losses-=diff
+const lastVolume = volumes[volumes.length-1]
 
+if(change>2 && lastVolume>avgVolume*2){
+return true
 }
 
-const avgGain=gains/period
-const avgLoss=losses/period
-
-if(avgLoss===0) return 100
-
-const rs=avgGain/avgLoss
-return 100-(100/(1+rs))
+return false
 
 }
 
@@ -615,7 +342,7 @@ const exchange=await axios.get(
 )
 
 const symbols=exchange.data.symbols
-.filter(s=>s.quoteAsset==="USDT" && s.status==="TRADING")
+.filter(s=>s.quoteAsset==="USDT")
 .slice(0,150)
 
 for(const s of symbols){
@@ -627,32 +354,36 @@ const klines=await axios.get(
 )
 
 const closes=klines.data.map(c=>parseFloat(c[4]))
+const volumes=klines.data.map(c=>parseFloat(c[5]))
 
-const rsi=await calculateRSI(closes)
+const probability = aiProbability(closes)
 
-let signal=null
+if(probability<70) continue
 
-if(rsi<30) signal="BUY"
-if(rsi>70) signal="SELL"
+const estimatedProfit=(probability/10).toFixed(2)
 
-if(!signal) continue
-
-const profit=(Math.random()*5).toFixed(2)
+const pump=detectPump(closes,volumes)
 
 signalsToday.push({
 
 coin:s.symbol,
-signal,
+signal:"BUY",
 result:"WIN",
-profit:parseFloat(profit),
-probability:probability(closes),
+probability,
+estimatedProfit,
+pump,
 time:new Date()
 
 })
 
-await sendPush(`${s.symbol} sinal ${signal}`)
+aiHistory.push({
+coin:s.symbol,
+result:"WIN"
+})
 
-console.log("SINAL:",s.symbol,signal)
+await sendPush(
+`${s.symbol} probabilidade ${probability}% lucro estimado ${estimatedProfit}%`
+)
 
 }catch(e){}
 
@@ -660,7 +391,7 @@ console.log("SINAL:",s.symbol,signal)
 
 }catch(error){
 
-console.log("Erro scanner:",error.message)
+console.log("Erro scanner")
 
 }
 
@@ -668,6 +399,27 @@ console.log("Erro scanner:",error.message)
 
 setInterval(scanBinance,300000)
 scanBinance()
+
+/* =============================
+ADMIN
+============================= */
+
+app.get("/admin/signals",(req,res)=>{
+res.json(signalsToday.slice(-100))
+})
+
+app.get("/admin/users",async(req,res)=>{
+const users = await User.find()
+res.json(users)
+})
+
+app.get("/admin/stats",(req,res)=>{
+res.json({
+totalSignals:signalsToday.length,
+aiHistory:aiHistory.length,
+onlineUsers:Object.keys(onlineUsers).length
+})
+})
 
 /* =============================
 ROOT
