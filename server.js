@@ -299,8 +299,10 @@ ranking[s.coin]+=s.profit || 0
 
 const result=Object.keys(ranking)
 .map(coin=>({
+
 coin,
 profit:ranking[coin]
+
 }))
 .sort((a,b)=>b.profit-a.profit)
 .slice(0,10)
@@ -310,10 +312,170 @@ res.json(result)
 })
 
 /* =============================
-SCANNER BINANCE AUTOMÁTICO
+CRIAR PIX
 ============================= */
 
-async function calculateRSI(closes, period = 14){
+app.post("/create-payment",async(req,res)=>{
+
+try{
+
+const {email}=req.body
+
+const result = await payment.create({
+
+body:{
+transaction_amount:29.9,
+description:"VIP 30 dias",
+payment_method_id:"pix",
+payer:{email}
+}
+
+})
+
+res.json({
+
+id:result.id,
+qrCodeBase64:result.point_of_interaction.transaction_data.qr_code_base64,
+pixCode:result.point_of_interaction.transaction_data.qr_code
+
+})
+
+}catch(error){
+
+console.log(error)
+
+res.status(500).json({error:"Erro PIX"})
+
+}
+
+})
+
+/* =============================
+CHECK PIX
+============================= */
+
+app.get("/check-payment/:id/:email",async(req,res)=>{
+
+try{
+
+const {id,email}=req.params
+
+const result=await payment.get({id})
+
+if(result.status==="approved"){
+
+activateVip(email)
+
+}
+
+res.json({status:result.status})
+
+}catch(error){
+
+console.log(error)
+
+res.status(500).json({error:"Erro verificar pagamento"})
+
+}
+
+})
+
+/* =============================
+CHECKOUT CARTÃO
+============================= */
+
+app.post("/create-checkout",async(req,res)=>{
+
+try{
+
+const {email}=req.body
+
+const result = await preference.create({
+
+body:{
+
+items:[
+{
+title:"VIP CryptoSignals 30 dias",
+quantity:1,
+currency_id:"BRL",
+unit_price:29.9
+}
+],
+
+payer:{email},
+
+back_urls:{
+success:"https://backend-vip.onrender.com",
+failure:"https://backend-vip.onrender.com",
+pending:"https://backend-vip.onrender.com"
+},
+
+notification_url:"https://backend-vip.onrender.com/webhook",
+
+auto_return:"approved"
+
+}
+
+})
+
+res.json({
+
+init_point:result.init_point
+
+})
+
+}catch(error){
+
+console.log(error)
+
+res.status(500).json({error:"Erro checkout"})
+
+}
+
+})
+
+/* =============================
+WEBHOOK CARTÃO
+============================= */
+
+app.post("/webhook",async(req,res)=>{
+
+try{
+
+const {type,data}=req.body
+
+if(type==="payment"){
+
+const paymentInfo=await payment.get({id:data.id})
+
+if(paymentInfo.status==="approved"){
+
+const email=paymentInfo.payer.email
+
+activateVip(email)
+
+}
+
+}
+
+res.sendStatus(200)
+
+}catch(error){
+
+console.log(error)
+
+res.sendStatus(500)
+
+}
+
+})
+
+/* =============================
+SCANNER BINANCE
+============================= */
+
+async function calculateRSI(closes,period=14){
 
 let gains=0
 let losses=0
@@ -333,9 +495,7 @@ const avgLoss=losses/period
 if(avgLoss===0) return 100
 
 const rs=avgGain/avgLoss
-const rsi=100-(100/(1+rs))
-
-return rsi
+return 100-(100/(1+rs))
 
 }
 
@@ -382,7 +542,7 @@ time:new Date()
 
 })
 
-console.log("SINAL:",s.symbol,signal,"RSI:",rsi)
+console.log("SINAL:",s.symbol,signal)
 
 }catch(e){}
 
