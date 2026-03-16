@@ -941,18 +941,27 @@ app.post("/recover-password", async (req,res)=>{
 
 try{
 
-const {email}=req.body?.email
+if(!req.body){
+return res.status(400).json({error:"Body vazio"})
+}
 
-if(!email)
+const email = req.body.email
+
+if(!email){
 return res.status(400).json({error:"Email não enviado"})
 }
 
 const user = await User.findOne({email})
 
-if(!user)
+if(!user){
 return res.status(404).json({error:"Usuário não encontrado"})
+}
+
+/* gerar nova senha */
 
 const newPassword = Math.random().toString(36).slice(-8)
+
+/* criptografar */
 
 const hashed = await bcrypt.hash(newPassword,8)
 
@@ -960,27 +969,37 @@ user.password = hashed
 
 await user.save()
 
+/* enviar email */
+
 await transporter.sendMail({
 
 from: process.env.EMAIL_USER,
 to: email,
-subject:"Recuperação de senha",
-text:`Sua nova senha é: ${newPassword}`
+subject:"Recuperação de senha - CryptoSignals",
+text:`Sua nova senha é: ${newPassword}
+
+Entre no app e altere depois.`
 
 })
 
-res.json({message:"Nova senha enviada por email"})
+console.log("EMAIL ENVIADO PARA:",email)
+
+res.json({
+success:true,
+message:"Nova senha enviada para seu email"
+})
 
 }catch(err){
 
-console.log("Erro recuperar senha:",err)
+console.log("ERRO AO ENVIAR EMAIL:",err)
 
-res.status(500).json({error:"Erro ao recuperar senha"})
+res.status(500).json({
+error:"Erro ao recuperar senha"
+})
 
 }
 
 })
-
 /* =============================
 ROOT
 ============================= */
