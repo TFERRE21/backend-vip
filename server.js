@@ -1267,12 +1267,173 @@ res.status(500).json({error:"Erro servidor"})
 })
 
 /* =============================
+TELA AFILIADO COMPLETA
+============================= */
+
+app.get("/affiliate/panel/:email",async(req,res)=>{
+
+try{
+
+const {email}=req.params
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+const totalRef=await User.countDocuments({
+refBy:user.refCode
+})
+
+const referrals=await User.find({
+refBy:user.refCode
+}).select("email vip vipExpires")
+
+/* GANHOS DO MÊS */
+
+const startMonth=new Date()
+startMonth.setDate(1)
+
+let ganhosMes=0
+
+for(const r of referrals){
+
+if(r.vip){
+ganhosMes += 29.9 * 0.03
+}
+
+}
+
+res.json({
+
+saldo:user.commission.toFixed(2),
+
+ganhosMes:ganhosMes.toFixed(2),
+
+codigo:user.refCode,
+
+link:`https://backend-vip.onrender.com/ref/${user.refCode}`,
+
+indicados:totalRef,
+
+lista:referrals
+
+})
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
+
+}
+
+})
+
+/* =============================
+MIDDLEWARE VIP
+============================= */
+
+async function requireVip(req,res,next){
+
+try{
+
+const {email} = req.body
+
+if(!email)
+return res.status(400).json({error:"Email obrigatório"})
+
+const user = await User.findOne({email})
+
+if(!user || !user.vip)
+return res.status(403).json({
+error:"Acesso VIP necessário"
+})
+
+next()
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
+
+}
+
+}
+
+/* =============================
+SINAIS VIP
+============================= */
+
+app.post("/vip/signals",requireVip,(req,res)=>{
+
+res.json({
+message:"Sinais VIP liberados"
+})
+
+})
+
+/* =============================
+STATUS VIP
+============================= */
+
+app.get("/vip/status/:email",async(req,res)=>{
+
+try{
+
+const {email}=req.params
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+res.json({
+
+vip:user.vip,
+vipExpires:user.vipExpires
+
+})
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
+
+}
+
+})
+
+/* =============================
 ROOT
 ============================= */
 
 app.get("/",(req,res)=>{
 res.send("Backend CryptoSignals rodando 🚀")
 })
+
+/* =============================
+VERIFICAR VIP EXPIRADO
+============================= */
+
+async function checkVipExpiration(){
+
+const now = new Date()
+
+const users = await User.find({
+vip:true,
+vipExpires:{$lt:now}
+})
+
+for(const user of users){
+
+user.vip = false
+
+await user.save()
+
+console.log("VIP expirado:",user.email)
+
+}
+
+}
+
+setInterval(checkVipExpiration,3600000)
 
 /* =============================
 SERVER
