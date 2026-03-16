@@ -446,10 +446,10 @@ res.json({ok:true})
 })
 
 /* =============================
-RESUMO DO DIA
+RESUMO DO DIA (VIP)
 ============================= */
 
-app.get("/daily-summary",(req,res)=>{
+app.post("/daily-summary",requireVip,(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -474,10 +474,10 @@ accuracy
 })
 
 /* =============================
-STATS PARA O APP
+STATS PARA O APP (VIP)
 ============================= */
 
-app.get("/stats",(req,res)=>{
+app.post("/stats",requireVip,(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -510,10 +510,10 @@ precisao:accuracy
 })
 
 /* =============================
-TOP TRADES
+TOP TRADES (VIP)
 ============================= */
 
-app.get("/top-trades",(req,res)=>{
+app.post("/top-trades",requireVip,(req,res)=>{
 
 const today=new Date().toDateString()
 
@@ -531,10 +531,10 @@ res.json(sorted)
 })
 
 /* =============================
-RANKING MOEDAS
+RANKING MOEDAS (VIP)
 ============================= */
 
-app.get("/top-coins",(req,res)=>{
+app.post("/top-coins",requireVip,(req,res)=>{
 
 let ranking={}
 
@@ -909,10 +909,10 @@ return "1.0"
 }
 
 /* =============================
-TOP 5 SINAIS DO MOMENTO
+TOP 5 SINAIS DO MOMENTO (VIP)
 ============================= */
 
-app.get("/top5",(req,res)=>{
+app.post("/top5",requireVip,(req,res)=>{
 
 try{
 
