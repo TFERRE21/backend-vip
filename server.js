@@ -260,6 +260,42 @@ accuracy
 })
 
 /* =============================
+STATS PARA O APP (ADICIONADO)
+============================= */
+
+app.get("/stats",(req,res)=>{
+
+const today=new Date().toDateString()
+
+const todaySignals=signalsToday.filter(s=>
+new Date(s.time).toDateString()===today
+)
+
+const wins=todaySignals.filter(s=>s.result==="WIN").length
+const loss=todaySignals.filter(s=>s.result==="LOSS").length
+
+const accuracy=todaySignals.length
+?((wins/todaySignals.length)*100).toFixed(1)
+:0
+
+const now=Date.now()
+
+const active=Object.values(onlineUsers)
+.filter(t=>now-t<120000)
+
+res.json({
+
+online:active.length,
+sinaisHoje:todaySignals.length,
+acertos:wins,
+erros:loss,
+precisao:accuracy
+
+})
+
+})
+
+/* =============================
 TOP TRADES
 ============================= */
 
@@ -555,10 +591,6 @@ console.log("Erro scanner:",error.message)
 }
 
 }
-
-/* =============================
-INICIAR SCANNER
-============================= */
 
 setInterval(scanBinance,300000)
 scanBinance()
