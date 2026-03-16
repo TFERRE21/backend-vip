@@ -934,6 +934,53 @@ console.log("Sinais registrados:",signalsToday.length)
 },60000)
 
 /* =============================
+RECUPERAR SENHA
+============================= */
+
+app.post("/recover-password", async (req,res)=>{
+
+try{
+
+const {email}=req.body
+
+if(!email)
+return res.status(400).json({error:"Email obrigatório"})
+
+const user = await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+const newPassword = Math.random().toString(36).slice(-8)
+
+const hashed = await bcrypt.hash(newPassword,8)
+
+user.password = hashed
+
+await user.save()
+
+await transporter.sendMail({
+
+from: process.env.EMAIL_USER,
+to: email,
+subject:"Recuperação de senha",
+text:`Sua nova senha é: ${newPassword}`
+
+})
+
+res.json({message:"Nova senha enviada por email"})
+
+}catch(err){
+
+console.log("Erro recuperar senha:",err)
+
+res.status(500).json({error:"Erro ao recuperar senha"})
+
+}
+
+})
+
+/* =============================
 ROOT
 ============================= */
 
