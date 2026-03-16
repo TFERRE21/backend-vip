@@ -891,46 +891,52 @@ app.post("/forgot-password",async(req,res)=>{
 
 try{
 
-let {email}=req.body
+if(!req.body || !req.body.email){
+return res.status(400).json({error:"Email obrigatório"})
+}
 
-email=email.toLowerCase().trim()
+let email=req.body.email.toLowerCase().trim()
 
 const user=await User.findOne({email})
 
-if(!user)
+if(!user){
 return res.status(404).json({error:"Usuário não encontrado"})
+}
 
+// gerar nova senha
 const novaSenha=Math.random().toString(36).slice(-8)
 
+// criptografar senha
 user.password=await bcrypt.hash(novaSenha,8)
 
 await user.save()
 
-const transporter=nodemailer.createTransport({
-
-service:"gmail",
-
-auth:{
-user:process.env.EMAIL_USER,
-pass:process.env.EMAIL_PASS
-}
-
-})
-
+// enviar email
 await transporter.sendMail({
 
 from:`"CryptoSignals" <${process.env.EMAIL_USER}>`,
 to:email,
-subject:"Nova senha",
-html:`<h2>Sua nova senha:</h2><h1>${novaSenha}</h1>`
+subject:"Recuperação de senha",
+html:`
+<h2>Recuperação de senha</h2>
+
+<p>Sua nova senha é:</p>
+
+<h1>${novaSenha}</h1>
+
+<p>Recomendamos alterar a senha após entrar no aplicativo.</p>
+`
 
 })
+
+console.log("Nova senha enviada para:",email)
 
 res.json({message:"Nova senha enviada por e-mail."})
 
 }catch(error){
 
-console.log(error)
+console.log("Erro recuperação senha:",error)
+
 res.status(500).json({error:"Erro ao enviar e-mail"})
 
 }
