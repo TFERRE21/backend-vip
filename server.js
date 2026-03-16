@@ -40,9 +40,12 @@ refBy:String,
 commission:{
 type:Number,
 default:0
-}
+},
+
+pixKey:String
 
 })
+
 
 /* =============================
 EMAIL SMTP (ADICIONADO)
@@ -1130,7 +1133,7 @@ app.get("/ref/:code",(req,res)=>{
 
 const {code}=req.params
 
-res.redirect(`cryptosignals://register?ref=${code}`)
+res.redirect(`/signup?ref=${code}`)
 
 })
 
@@ -1158,6 +1161,102 @@ link:`https://backend-vip.onrender.com/ref/${user.refCode}`,
 commission:user.commission
 
 })
+
+}catch(e){
+
+res.status(500).json({error:"Erro servidor"})
+
+}
+
+})
+
+/* =============================
+PÁGINA DE CADASTRO AFILIADO
+============================= */
+
+app.get("/signup",(req,res)=>{
+
+const {ref}=req.query
+
+res.send(`
+
+<html>
+<head>
+<title>Cadastro CryptoSignals</title>
+<style>
+
+body{
+font-family:Arial;
+background:#0f172a;
+color:white;
+text-align:center;
+padding:40px
+}
+
+input{
+padding:12px;
+margin:10px;
+width:250px;
+border-radius:6px;
+border:none
+}
+
+button{
+padding:12px 20px;
+background:#22c55e;
+border:none;
+color:white;
+font-weight:bold;
+border-radius:6px;
+cursor:pointer
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>🚀 Criar Conta</h1>
+
+<form method="POST" action="/register">
+
+<input type="email" name="email" placeholder="Seu email" required><br>
+
+<input type="password" name="password" placeholder="Sua senha" required><br>
+
+<input type="hidden" name="ref" value="${ref || ""}">
+
+<button type="submit">Criar conta</button>
+
+</form>
+
+</body>
+</html>
+
+`)
+
+})
+
+/* =============================
+SALVAR PIX
+============================= */
+
+app.post("/affiliate/pix",async(req,res)=>{
+
+try{
+
+const {email,pixKey}=req.body
+
+const user=await User.findOne({email})
+
+if(!user)
+return res.status(404).json({error:"Usuário não encontrado"})
+
+user.pixKey=pixKey
+
+await user.save()
+
+res.json({message:"PIX salvo"})
 
 }catch(e){
 
