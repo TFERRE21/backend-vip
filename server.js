@@ -957,32 +957,21 @@ if(!user){
 return res.status(404).json({error:"Usuário não encontrado"})
 }
 
-/* gerar nova senha */
-
 const newPassword = Math.random().toString(36).slice(-8)
-
-/* criptografar senha */
 
 const hashedPassword = await bcrypt.hash(newPassword,8)
 
 user.password = hashedPassword
-
 await user.save()
-
-/* enviar email */
 
 await transporter.sendMail({
 
-from: process.env.EMAIL_USER,
+from: `"CryptoSignals" <${process.env.EMAIL_USER}>`,
 to: email,
-subject:"Recuperação de senha - CryptoSignals",
-text:`Sua nova senha é: ${newPassword}
-
-Entre no app e altere depois.`
+subject:"Recuperação de senha",
+text:`Sua nova senha é: ${newPassword}`
 
 })
-
-console.log("EMAIL ENVIADO PARA:",email)
 
 res.json({
 success:true,
@@ -994,7 +983,7 @@ message:"Nova senha enviada por email"
 console.log("ERRO AO ENVIAR EMAIL:",err)
 
 res.status(500).json({
-error:"Erro ao recuperar senha"
+error:"Erro ao enviar email"
 })
 
 }
