@@ -961,11 +961,11 @@ return res.status(404).json({error:"Usuário não encontrado"})
 
 const newPassword = Math.random().toString(36).slice(-8)
 
-/* criptografar */
+/* criptografar senha */
 
-const hashed = await bcrypt.hash(newPassword,8)
+const hashedPassword = await bcrypt.hash(newPassword,8)
 
-user.password = hashed
+user.password = hashedPassword
 
 await user.save()
 
@@ -986,7 +986,7 @@ console.log("EMAIL ENVIADO PARA:",email)
 
 res.json({
 success:true,
-message:"Nova senha enviada para seu email"
+message:"Nova senha enviada por email"
 })
 
 }catch(err){
